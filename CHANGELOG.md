@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.2 — 2026-11-01
+
+- Document the two different limits: cc-connect's per-session incoming rate
+  limit (“消息发送过快，请稍后再试”) and WeChat ilink's proactive send budget.
+- Add `[rate_limit]` to the example config with a single-user note.
+- Add a README troubleshooting section.
+
 ## v0.1.1 — 2026-11-01
 
 - Cap proactive care at 2/day to fit WeChat ilink's ~4-6 proactive sends per

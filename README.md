@@ -205,6 +205,17 @@ memory、config、日志或 token。
 - OpenAI `gpt-6-luna`
 - 两个微信 ilink bot
 
+## Troubleshooting
+
+- **“⏳ 消息发送过快，请稍后再试”** — cc-connect's per-session incoming rate limit
+  (default 20 messages / 60 seconds). For a trusted single-user deployment set
+  `[rate_limit] max_messages = 0` in `config.toml`, or wait a minute.
+- **“send budget exhausted”** — WeChat ilink limits proactive sends to roughly
+  4-6 per 24 hours. Reduce proactive messages, wait for the window, or re-login
+  the bot. Care is capped at 2/day by default.
+- **“no stored context_token”** — the recipient must message that bot first;
+  WeChat does not allow a bot to start a conversation.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Attribution and design references: [NOTICE.md](NOTICE.md).

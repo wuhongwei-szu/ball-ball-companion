@@ -14,6 +14,13 @@ tool_messages = false
 # Suppress the "⏰ task started" notification for cron/timer jobs.
 silent = true
 
+[rate_limit]
+# Per-session incoming message limit. Default: 20 messages / 60 seconds.
+# The bot replies "⏳ 消息发送过快，请稍后再试" when exceeded.
+# Set max_messages = 0 for a trusted single-user deployment.
+max_messages = 20
+window_secs = 60
+
 [[projects]]
 name = "my-project"
 

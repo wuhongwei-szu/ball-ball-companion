@@ -53,3 +53,8 @@ Edit the constants in `care_scheduler.py`:
 - `context_token` expired — the secondary user must message their bot first.
 - Timer fired but no message — the agent may have decided `NO_REPLY`; check
   the logs and `memory/raw/`.
+- `消息发送过快，请稍后再试` — cc-connect's incoming per-session rate limit
+  (default 20/60s), not the model. Set `[rate_limit] max_messages = 0` for a
+  trusted single user, or wait.
+- `send budget exhausted` — WeChat ilink's proactive send budget (~4-6/24h);
+  reduce sends or re-login the bot.

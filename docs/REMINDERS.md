@@ -24,10 +24,12 @@ via `send_msg.py`, and ends with `NO_REPLY`.
 
 `care_scheduler.py` runs from the `careplan01` cron at 08:17:
 
-- Rolls 0/1/2/3 opportunities with weights 50/30/15/5.
+- Rolls 0/1/2 opportunities with weights 55/32/13.
 - A day with 0 opportunities sends nothing.
 - Times are random between 08:30 and 21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
+- Capped at 2/day because WeChat ilink throttles proactive sends to roughly
+  4-6 per 24h (daily news and event reminders share the same budget).
 - Each opportunity is only a chance: the agent decides from `STATE.md`,
   `MEMORY.md`, `EVENTS.md`, and recent raw context whether there is a real
   reason to message. If not, it replies `NO_REPLY`.
@@ -39,7 +41,7 @@ dsh-proactive / whalecare (daily limit and quiet hours), and cc-connect timers.
 
 Edit the constants in `care_scheduler.py`:
 
-- `WEIGHTS` — how often 0/1/2/3 opportunities occur
+- `WEIGHTS` — how often 0/1/2 opportunities occur
 - `WINDOW_START_MIN` / `WINDOW_END_MIN` — safe active window
 - `MIN_GAP_MIN` — spacing between opportunities
 - `MAX_TIMERS` — daily cap

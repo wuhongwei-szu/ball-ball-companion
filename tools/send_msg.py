@@ -22,6 +22,9 @@ def send_master(text):
     ])
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
+        if "send budget exhausted" in detail.lower() or "budget" in detail.lower():
+            print("微信主动发送额度暂时用完，球球先不发了；等额度恢复或重新登录后再试。")
+            return 2
         print(f"发送失败：{detail[:200]}")
         return 1
     c.append_raw("s1", text)

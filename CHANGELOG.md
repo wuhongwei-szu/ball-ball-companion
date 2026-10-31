@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.1 — 2026-11-01
+
+- Cap proactive care at 2/day to fit WeChat ilink's ~4-6 proactive sends per
+  24 hours; daily news and event reminders share the same budget.
+- Handle "send budget exhausted" with a clear local message instead of
+  retrying.
+- Document the send budget in README and reminder docs.
+
 ## v0.1.0 — 2026-11-01
 
 Initial public release, extracted from a private personal deployment.

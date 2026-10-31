@@ -7,8 +7,10 @@ Adapted from open-source patterns:
 - cc-connect 1.5: one-shot timers
 
 Rules:
-- Roll 0/1/2/3 opportunities (weights 50/30/15/5).
-- Some days send nothing; some days may have several.
+- Roll 0/1/2 opportunities (weights 55/32/13).
+- Some days send nothing; some days may have two.
+- Capped at 2/day so WeChat ilink's proactive-send budget (~4-6/24h)
+  is not exhausted by care alone.
 - Times are random in 08:30-21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
 - Each opportunity is only a chance: the agent sends only with real context.
@@ -28,10 +30,10 @@ if hasattr(sys.stdout, "reconfigure"):
 WINDOW_START_MIN = 8 * 60 + 30
 WINDOW_END_MIN = 21 * 60 + 30
 MIN_GAP_MIN = 120
-MAX_TIMERS = 3
-WEIGHTS = [50, 30, 15, 5]  # 0, 1, 2, 3
+MAX_TIMERS = 2
+WEIGHTS = [55, 32, 13]  # 0, 1, 2
 
-PROMPT = """【上下文关怀】现在是 {when_text}。今天这是第 {index}/{total} 次随机关怀机会（每天最多 3 次）。
+PROMPT = """【上下文关怀】现在是 {when_text}。今天这是第 {index}/{total} 次随机关怀机会（每天最多 2 次）。
 请阅读 {work_dir}/PERSONA.md、memory/MEMORY.md、memory/STATE.md、memory/EVENTS.md 和今天/昨天的原文，判断有没有值得主动关心{master_label}或{partner_label}的事（累了、忙、考试/体测/面试、情绪、久未联系、约定临近）。
 如果有，用 1-2 条自然的微信短消息发过去（send_msg.py master 或 xi，按对象选择；如果对方上下文过期就跳过，不要报错）；没有就只回复 NO_REPLY，不要为了发而发。
 现在如果不在 08:00-22:00，不要发。不要提系统任务。"""

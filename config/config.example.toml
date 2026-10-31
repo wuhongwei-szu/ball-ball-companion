@@ -1,0 +1,59 @@
+# cc-connect configuration (example — copy and fill in your own values)
+# Never commit real tokens, openids, or API keys.
+
+language = "zh"
+
+[log]
+level = "info"
+
+[display]
+thinking_messages = false
+tool_messages = false
+
+[cron]
+# Suppress the "⏰ task started" notification for cron/timer jobs.
+silent = true
+
+[[projects]]
+name = "my-project"
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "C:\\ai-companion"
+codex_home = "C:\\ai-companion\\.codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"
+# yolo = full local permissions. Restrict allow_from and use a sandboxed mode
+# if your deployment does not need shell access.
+mode = "yolo"
+provider = "openai-official"
+
+[[projects.agent.providers]]
+name = "openai-official"
+api_key = "${OPENAI_API_KEY}"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6-luna"
+env = { HTTP_PROXY = "", HTTPS_PROXY = "", NO_PROXY = "127.0.0.1,localhost" }
+codex = { wire_api = "responses" }
+
+# Bot A: primary user
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+token = "botA@im.bot:REPLACE_ME"
+base_url = "https://ilinkai.weixin.qq.com"
+account_id = "botA@im.bot"
+allow_from = "<OWNER_OPENID>@im.wechat"
+
+# Bot B: secondary user
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+token = "botB@im.bot:REPLACE_ME"
+base_url = "https://ilinkai.weixin.qq.com"
+account_id = "botB@im.bot"
+allow_from = "<PARTNER_OPENID>@im.wechat"

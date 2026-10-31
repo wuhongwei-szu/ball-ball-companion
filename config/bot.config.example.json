@@ -1,0 +1,20 @@
+{
+  "bot_name": "Companion",
+  "work_dir": "C:\\ai-companion",
+  "cc_data_dir": "%USERPROFILE%\\.cc-connect",
+  "cc_project": "my-project",
+  "cc_bin": "%APPDATA%\\npm\\node_modules\\cc-connect\\bin\\cc-connect.exe",
+  "cc_config_file": "%USERPROFILE%\\.cc-connect\\config.toml",
+  "session_file": "%USERPROFILE%\\.cc-connect\\sessions\\my-project_<hash>.json",
+  "master_session_id": "s1",
+  "xi_session_id": "s2",
+  "xi_platform_index": 2,
+  "weixin_api_url": "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
+  "proxy": "",
+  "codex_home": "C:\\ai-companion\\.codex",
+  "codex_wrapper": "C:\\ai-companion\\bin\\codex.exe",
+  "labels": {
+    "master": "Owner",
+    "xi": "Partner"
+  }
+}

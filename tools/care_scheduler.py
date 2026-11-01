@@ -7,10 +7,11 @@ Adapted from open-source patterns:
 - cc-connect 1.5: one-shot timers
 
 Rules:
-- Roll 0-4 opportunities (weights 45/30/15/8/2).
-- Some days send nothing; some days may have several.
-- No local send quota: the owner asked to remove it. Each opportunity is still
-  context-gated, and iLink's own ret=-2 throttle is respected without retry.
+- Roll 0-2 opportunities (weights 55/32/13).
+- Some days send nothing; some days may have two.
+- Each opportunity is context-gated; proactive messages share a local
+  4-message/24h safety budget and a 5-minute gap, below the observed iLink
+  4-6/24h server limit. iLink ret=-2 is respected without retry.
 - Times are random in 08:30-21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
 - Each opportunity is only a chance: the agent sends only with real context.
@@ -30,10 +31,10 @@ if hasattr(sys.stdout, "reconfigure"):
 WINDOW_START_MIN = 8 * 60 + 30
 WINDOW_END_MIN = 21 * 60 + 30
 MIN_GAP_MIN = 120
-MAX_TIMERS = 4
-WEIGHTS = [45, 30, 15, 8, 2]  # 0, 1, 2, 3, 4 (owner asked for no hard send cap)
+MAX_TIMERS = 2
+WEIGHTS = [55, 32, 13]  # 0, 1, 2 — fits under the 4-message proactive safety budget
 
-PROMPT = """【上下文关怀】现在是 {when_text}。今天这是第 {index}/{total} 次随机关怀机会（主人要求不设发送额度）。
+PROMPT = """【上下文关怀】现在是 {when_text}。今天这是第 {index}/{total} 次随机关怀机会（本地主动消息安全上限 4 条/24h、间隔至少 5 分钟；这次最多 2 条）。
 请阅读 {work_dir}/PERSONA.md、memory/MEMORY.md、memory/STATE.md、memory/EVENTS.md、memory/THREADS.md 和今天/昨天的原文，判断有没有值得主动关心{master_label}或{partner_label}的事（累了、忙、考试/体测/面试、情绪、久未联系、约定临近、THREADS 里的未完话题）。
 如果最近两次主动消息对方都没回，就只回复 NO_REPLY，不要继续发。
 如果有，用 python -X utf8 {work_dir}/tools/chat_burst.py master|xi --proactive [--sticker <分类>] "第一句" "第二句" 发 1-2 条；按对象选择 master/xi。表情最多 1 张/天，没有合适的分类就纯文字；如果对方上下文过期就跳过，不要重试、不要报错。

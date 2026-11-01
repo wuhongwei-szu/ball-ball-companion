@@ -31,9 +31,11 @@ DEFAULTS = {
     "weixin_api_url": "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
     "weixin_cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
     "sticker_dir": os.path.join(ROOT, "assets", "stickers"),
-    "sticker_daily_limit": 3,
-    "sticker_proactive_daily_limit": 1,
-    "sticker_cooldown_seconds": 0,
+    "sticker_daily_limit": 12,
+    "sticker_proactive_daily_limit": 0,
+    "sticker_cooldown_seconds": 30,
+    "proactive_daily_limit": 4,
+    "proactive_min_gap_seconds": 300,
     "proxy": "",
     "codex_home": os.path.join(ROOT, ".codex"),
     "codex_wrapper": os.path.join(ROOT, "bin", "codex.exe"),
@@ -142,9 +144,11 @@ WEIXIN_API_URL = CFG["weixin_api_url"]
 WEIXIN_API_BASE = WEIXIN_API_URL.split("/ilink/bot/", 1)[0]
 WEIXIN_CDN_BASE_URL = CFG["weixin_cdn_base_url"].rstrip("/")
 STICKER_DIR = CFG["sticker_dir"]
-STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 3))
-STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 1))
-STICKER_COOLDOWN_SECONDS = int(CFG.get("sticker_cooldown_seconds", 0))
+STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 12))
+STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 0))
+STICKER_COOLDOWN_SECONDS = int(CFG.get("sticker_cooldown_seconds", 30))
+PROACTIVE_DAILY_LIMIT = int(CFG.get("proactive_daily_limit", 4))
+PROACTIVE_MIN_GAP_SECONDS = int(CFG.get("proactive_min_gap_seconds", 300))
 PROXY = CFG["proxy"]
 CODEX_HOME = CFG["codex_home"]
 CODEX_WRAPPER = CFG["codex_wrapper"]
@@ -156,6 +160,7 @@ REMINDERS_INDEX = os.path.join(MEMORY_DIR, "reminders.json")
 CARE_PLAN_FILE = os.path.join(MEMORY_DIR, ".care_plan.json")
 CAPTURE_STATE_FILE = os.path.join(MEMORY_DIR, ".capture_state.json")
 STICKER_USAGE_FILE = os.path.join(MEMORY_DIR, "sticker_usage.json")
+OUTBOUND_STATE_FILE = os.path.join(MEMORY_DIR, "outbound_state.json")
 THREADS_FILE = os.path.join(MEMORY_DIR, "THREADS.md")
 
 RECENT_HEADER = (
@@ -213,6 +218,68 @@ def read_context_token(path, peer):
     data = load_json(path, {}) or {}
     token = data.get(peer, "") if isinstance(data, dict) else ""
     return token if isinstance(token, str) else ""
+
+
+def _local_now():
+    return datetime.datetime.now().astimezone()
+
+
+def _outbound_entry(target):
+    """Load/create today's outbound counters for one bot."""
+    state = load_json(OUTBOUND_STATE_FILE, {})
+    if not isinstance(state, dict):
+        state = {}
+    today = _local_now().date().isoformat()
+    target_state = state.get(target)
+    if not isinstance(target_state, dict):
+        target_state = {}
+        state[target] = target_state
+    entry = target_state.get(today)
+    if not isinstance(entry, dict):
+        entry = {"proactive": 0, "replies": 0, "last_proactive": ""}
+        target_state[today] = entry
+    cutoff = (_local_now().date() - datetime.timedelta(days=7)).isoformat()
+    for key in list(target_state):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", key) or key < cutoff:
+            del target_state[key]
+    return state, entry
+
+
+def proactive_remaining(target):
+    """Return (remaining_messages, reason). 0 means wait; a huge number = unlimited."""
+    if PROACTIVE_DAILY_LIMIT <= 0:
+        return 10**9, ""
+    _, entry = _outbound_entry(target)
+    count = int(entry.get("proactive", 0) or 0)
+    if count >= PROACTIVE_DAILY_LIMIT:
+        return 0, f"今天主动消息已达本地安全上限 {PROACTIVE_DAILY_LIMIT} 条"
+    if PROACTIVE_MIN_GAP_SECONDS > 0:
+        last = entry.get("last_proactive", "")
+        try:
+            when = datetime.datetime.fromisoformat(last)
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=_local_now().tzinfo)
+        except Exception:
+            when = None
+        if when:
+            elapsed = (_local_now() - when).total_seconds()
+            if elapsed < PROACTIVE_MIN_GAP_SECONDS:
+                return 0, (
+                    f"距上条主动消息 {int(elapsed)} 秒，"
+                    f"至少间隔 {PROACTIVE_MIN_GAP_SECONDS} 秒"
+                )
+    return PROACTIVE_DAILY_LIMIT - count, ""
+
+
+def record_outbound(target, proactive=False, count=1):
+    """Persist a successful outbound message count."""
+    state, entry = _outbound_entry(target)
+    if proactive:
+        entry["proactive"] = int(entry.get("proactive", 0) or 0) + count
+        entry["last_proactive"] = _local_now().isoformat(timespec="seconds")
+    else:
+        entry["replies"] = int(entry.get("replies", 0) or 0) + count
+    save_json_atomic(OUTBOUND_STATE_FILE, state)
 
 
 def append_raw(sid, text, role="assistant", ts=None):

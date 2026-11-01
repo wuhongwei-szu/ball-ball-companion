@@ -212,11 +212,16 @@ def _record(target, manifest, entry, proactive):
 
 
 def send_one(target, category=None, style=None, sticker_id=None,
-             proactive=False, force=False, dry_run=False):
+             proactive=False, force=False, dry_run=False, skip_budget=False):
     """Select, send and record one sticker. Returns 0/-1/3; never raises on send."""
     if target not in {"master", "xi"}:
         print("需要目标 master 或 xi")
         return 1
+    if proactive and not skip_budget:
+        remaining, reason = c.proactive_remaining(target)
+        if remaining <= 0:
+            print(f"[budget] {reason}；这次不发")
+            return 3
     manifest = load_manifest()
     usage = load_usage()
     state = target_state(usage, target)
@@ -246,6 +251,7 @@ def send_one(target, category=None, style=None, sticker_id=None,
     code = _send_master(path) if target == "master" else _send_xi(path)
     if code == 0:
         _record(target, manifest, entry, proactive)
+        c.record_outbound(target, proactive=proactive)
     return code
 
 

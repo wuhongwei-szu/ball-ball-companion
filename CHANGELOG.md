@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.4 — 2026-11-01
+
+- Run as close to the iLink limit as is safe: proactive messages share a
+  local 4-message/24h budget with a 5-minute gap; chat bursts allow up to 6
+  messages; stickers allow 12/day with a 30-second cooldown. All are
+  configurable, and `0` disables a local cap.
+- Keep the distinction explicit: these local limits protect the account; the
+  iLink server's `ret=-2` throttle cannot be removed locally.
+
 ## v0.2.3 — 2026-11-01
 
 - Make local send limits configurable; `0` means unlimited for

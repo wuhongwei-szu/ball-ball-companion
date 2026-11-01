@@ -26,17 +26,18 @@ per day” cap and should be omitted for urgent or serious reminders.
 
 `care_scheduler.py` runs from the `careplan01` cron at 08:17:
 
-- Rolls 0-4 opportunities with weights 45/30/15/8/2.
+- Rolls 0-2 opportunities with weights 55/32/13.
 - A day with 0 opportunities sends nothing.
 - Times are random between 08:30 and 21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
-- No local send quota; this is a product/context setting, not a WeChat quota.
+- Proactive messages share a local safety budget: 4 messages/24h and a
+  5-minute gap, below the observed iLink 4-6/24h server limit. Each care
+  opportunity sends at most 2 bubbles.
 - Each opportunity is only a chance: the agent decides from `STATE.md`,
   `MEMORY.md`, `EVENTS.md`, `THREADS.md`, and recent raw context whether there
   is a real reason to message. If not, it replies `NO_REPLY`.
-- Proactive messages use `chat_burst.py --proactive`; stickers and bubble
-  counts are context-driven. iLink may still throttle with `ret=-2`; stop and
-  wait, never retry in a loop.
+- Proactive messages use `chat_burst.py --proactive`; iLink may still throttle
+  with `ret=-2`; stop and wait, never retry in a loop.
 
 This follows patterns from SillyTavern Time-Awareness (probabilistic triggers),
 dsh-proactive / whalecare (daily limit and quiet hours), and cc-connect timers.

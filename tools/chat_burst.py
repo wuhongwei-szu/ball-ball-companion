@@ -26,6 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 MAX_TOTAL_SLEEP = 5.0
+MAX_BURST_MESSAGES = 6
 
 
 def _delays(count, min_delay, max_delay, first_delay):
@@ -53,13 +54,13 @@ def _send_text(target, text):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="发 1-3 条短消息 + 可选 1 张表情")
+    parser = argparse.ArgumentParser(description="发短消息 + 可选 1 张表情")
     parser.add_argument("target", choices=["master", "xi"])
     parser.add_argument("messages", nargs="+", help="每条气泡一句话")
     parser.add_argument("--sticker", help="表情分类；脚本按概率决定发不发")
     parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
-    parser.add_argument("--proactive", action="store_true", help="标记为主动消息，表情限额 1 张/天")
-    parser.add_argument("--probability", type=float, default=1.0, help="发表情的概率（0-1，默认 1.0；不设随机额度）")
+    parser.add_argument("--proactive", action="store_true", help="标记为主动消息，受本地主动安全预算约束")
+    parser.add_argument("--probability", type=float, default=0.5, help="发表情的概率（0-1，默认 0.5）")
     parser.add_argument("--min-delay", type=float, default=0.7)
     parser.add_argument("--max-delay", type=float, default=1.8)
     parser.add_argument("--first-delay", type=float, default=None)
@@ -76,6 +77,33 @@ def main():
     send_sticker_flag = bool(args.sticker) and random.random() < probability
     if args.sticker and not send_sticker_flag:
         print(f"[sticker] 概率未命中（p={probability:.2f}），这次只发文字")
+
+    # Local burst cap: generous, but not an unbounded wall of bubbles.
+    allowed = MAX_BURST_MESSAGES - (1 if send_sticker_flag else 0)
+    if len(messages) > allowed:
+        print(f"[chat] 每轮本地安全上限 {MAX_BURST_MESSAGES} 条（表情算一条），已截断文字")
+        messages = messages[:max(0, allowed)]
+
+    # Proactive messages are the ones iLink throttles most; keep a safety
+    # margin below the observed 4-6/24h server limit.
+    if args.proactive:
+        remaining, reason = c.proactive_remaining(args.target)
+        if remaining <= 0:
+            print(f"[budget] {reason}；这次先不发")
+            return 3
+        planned = len(messages) + (1 if send_sticker_flag else 0)
+        if planned > remaining:
+            text_budget = remaining - (1 if send_sticker_flag else 0)
+            if text_budget <= 0:
+                messages = []
+                send_sticker_flag = bool(args.sticker)
+            else:
+                messages = messages[:text_budget]
+            print(f"[budget] 主动消息本地剩余 {remaining} 条，已压缩本次发送")
+        if not messages and not send_sticker_flag:
+            print("[budget] 本次没有可发内容")
+            return 3
+
     delays = _delays(len(messages), args.min_delay, args.max_delay, args.first_delay)
 
     if args.dry_run:
@@ -101,6 +129,7 @@ def main():
         if code != 0:
             print(f"[chat] 第 {index} 条文字发送失败，停止后续发送（已发送 {index - 1} 条）")
             return code
+        c.record_outbound(args.target, proactive=args.proactive)
 
     if send_sticker_flag:
         code = send_sticker.send_one(
@@ -109,6 +138,7 @@ def main():
             style=args.style,
             proactive=args.proactive,
             force=args.force_sticker,
+            skip_budget=bool(args.proactive),
         )
         if code not in (0, 3):
             print("[chat] 文字已送达，表情发送失败；不要重发文字")

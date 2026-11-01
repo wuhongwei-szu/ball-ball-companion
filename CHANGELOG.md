@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.1 — 2026-11-01
+
+- Sticker quality pass: skip images below 240px or 20KB to avoid blurry
+  stickers; prefer cat/pig/cute anime/silly styles per bot instead of generic
+  old memes. Local library replaced the older ATRI set with cute anime and
+  blue-fish packs (assets remain local only).
+- Keep `send_sticker.py` cooldown timestamps timezone-safe.
+
 ## v0.2.0 — 2026-11-01
 
 - Add a local sticker library (`sticker_admin.py`) and an agent-facing

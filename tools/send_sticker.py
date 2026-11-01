@@ -31,6 +31,11 @@ if hasattr(sys.stdout, "reconfigure"):
 MANIFEST = os.path.join(c.STICKER_DIR, "manifest.json")
 COOLDOWN_SECONDS = 120
 RECENT_DAYS = 3
+MIN_DIM = 240
+DEFAULT_STYLES = {
+    "master": ("cat", "pig", "anime", "silly", "generic"),
+    "xi": ("cat", "anime", "generic", "text"),
+}
 
 
 def load_manifest():
@@ -125,7 +130,7 @@ def choose(manifest, category=None, style=None, sticker_id=None):
     return random.choice(pool)
 
 
-def _select_candidate(manifest, category, style, sticker_id, state):
+def _select_candidate(manifest, category, style, sticker_id, state, target):
     base = choose(manifest, category, style, sticker_id)
     if sticker_id:
         return base
@@ -134,6 +139,15 @@ def _select_candidate(manifest, category, style, sticker_id, state):
         styled = [e for e in pool if e.get("style") == style]
         if styled:
             pool = styled
+    else:
+        for preferred in DEFAULT_STYLES.get(target, ()):
+            styled = [e for e in pool if e.get("style") == preferred]
+            if styled:
+                pool = styled
+                break
+    clear = [e for e in pool if min(int(e.get("width", 0)), int(e.get("height", 0))) >= MIN_DIM]
+    if clear:
+        pool = clear
     recent = _recent_ids(state.get("sent", []))
     fresh = [e for e in pool if e.get("id") not in recent]
     pool = fresh or pool
@@ -220,7 +234,7 @@ def send_one(target, category=None, style=None, sticker_id=None,
             print(f"刚发过表情（{int(elapsed)} 秒前），这次先不发")
             return 3
 
-    entry = _select_candidate(manifest, category, style, sticker_id, state)
+    entry = _select_candidate(manifest, category, style, sticker_id, state, target)
     path = os.path.join(c.STICKER_DIR, entry["file"])
     if not os.path.isfile(path):
         print(f"表情文件缺失：{entry['file']}")

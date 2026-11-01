@@ -161,7 +161,8 @@ python -X utf8 tools/sticker_admin.py validate
 python -X utf8 tools/sticker_admin.py list
 ```
 
-用 `import` 导入自己的图库；用 `catalog` 生成分类说明。`send_xi.py --image` 直连第二个 bot 的 iLink 媒体上传，避免 cc-connect 多 bot 路由到错误的账号。
+用 `import` 导入自己的图库；用 `catalog` 生成分类说明。扫描会跳过小于 240px 或小于 20KB 的图，避免发出糊图。
+`send_xi.py --image` 直连第二个 bot 的 iLink 媒体上传，避免 cc-connect 多 bot 路由到错误的账号。
 
 ### 事件提醒
 

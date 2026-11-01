@@ -33,6 +33,8 @@ MANIFEST = os.path.join(c.STICKER_DIR, "manifest.json")
 CATALOG = os.path.join(c.STICKER_DIR, "CATEGORIES.md")
 IMAGE_EXTS = {".gif", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_BYTES = 2 * 1024 * 1024
+MIN_BYTES = 20 * 1024
+MIN_DIM = 240
 MAX_DIM = 800
 STYLES = {"cat", "pig", "anime", "generic", "text", "silly"}
 
@@ -63,7 +65,8 @@ CATEGORY_DESCRIPTIONS = {
 
 PACK_STYLES = {
     "official-001": "generic",
-    "atri": "anime",
+    "seio": "anime",
+    "bluefish": "silly",
     "chinesebqb": "generic",
 }
 
@@ -152,6 +155,9 @@ def scan():
         if size > MAX_BYTES:
             skipped.append((rel, f"{size // 1024}KB > 2MB"))
             continue
+        if size < MIN_BYTES:
+            skipped.append((rel, f"{size // 1024}KB < 20KB (blurry)"))
+            continue
         info = _image_info(path)
         if info is None:
             skipped.append((rel, "unreadable image"))
@@ -162,6 +168,9 @@ def scan():
             skipped.append((rel, f"{size // 1024}KB > 2MB after resize"))
             continue
         info = _image_info(path) or info
+        if min(info[0], info[1]) < MIN_DIM:
+            skipped.append((rel, f"{info[0]}x{info[1]} below {MIN_DIM}px"))
+            continue
         digest = _sha256(path)
         if digest in seen:
             skipped.append((rel, "duplicate sha256"))
@@ -234,6 +243,10 @@ def validate():
             errors.append(f"bad style: {entry.get('style')!r} ({rel})")
         if os.path.getsize(path) > MAX_BYTES:
             errors.append(f"too large: {rel}")
+        if os.path.getsize(path) < MIN_BYTES:
+            errors.append(f"likely blurry (<20KB): {rel}")
+        if min(int(entry.get("width", 0)), int(entry.get("height", 0))) < MIN_DIM:
+            errors.append(f"too small: {rel}")
     print(f"VALIDATE {'OK' if not errors else 'FAILED'} stickers={len(manifest['stickers'])} errors={len(errors)}")
     for error in errors[:20]:
         print("  " + error)

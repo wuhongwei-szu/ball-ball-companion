@@ -13,6 +13,7 @@ import argparse
 import datetime
 import os
 import random
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -130,7 +131,7 @@ def choose(manifest, category=None, style=None, sticker_id=None):
     return random.choice(pool)
 
 
-def _select_candidate(manifest, category, style, sticker_id, state, target):
+def _select_candidate(manifest, category, style, sticker_id, state, target, prefer=None):
     base = choose(manifest, category, style, sticker_id)
     if sticker_id:
         return base
@@ -145,6 +146,17 @@ def _select_candidate(manifest, category, style, sticker_id, state, target):
             if styled:
                 pool = styled
                 break
+    if prefer:
+        keywords = [k.strip().lower() for k in re.split(r"[,，\s]+", prefer) if k.strip()]
+        matched = []
+        for entry in pool:
+            haystack = (entry.get("label", "") + " " + " ".join(entry.get("tags", []))).lower()
+            if any(keyword in haystack for keyword in keywords):
+                matched.append(entry)
+        if matched:
+            pool = matched
+        else:
+            print(f"[sticker] prefer={prefer} 没有匹配，改用同分类", file=sys.stderr)
     clear = [e for e in pool if min(int(e.get("width", 0)), int(e.get("height", 0))) >= MIN_DIM]
     if clear:
         pool = clear
@@ -212,7 +224,7 @@ def _record(target, manifest, entry, proactive):
 
 
 def send_one(target, category=None, style=None, sticker_id=None,
-             proactive=False, force=False, dry_run=False, skip_budget=False):
+             proactive=False, force=False, dry_run=False, skip_budget=False, prefer=None):
     """Select, send and record one sticker. Returns 0/-1/3; never raises on send."""
     if target not in {"master", "xi"}:
         print("需要目标 master 或 xi")
@@ -239,7 +251,7 @@ def send_one(target, category=None, style=None, sticker_id=None,
             print(f"刚发过表情（{int(elapsed)} 秒前），这次先不发")
             return 3
 
-    entry = _select_candidate(manifest, category, style, sticker_id, state, target)
+    entry = _select_candidate(manifest, category, style, sticker_id, state, target, prefer)
     path = os.path.join(c.STICKER_DIR, entry["file"])
     if not os.path.isfile(path):
         print(f"表情文件缺失：{entry['file']}")
@@ -261,6 +273,7 @@ def main():
     parser.add_argument("--category")
     parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
     parser.add_argument("--id", dest="sticker_id")
+    parser.add_argument("--prefer", help="按标签/文字偏好筛选，如 贴贴,抱,合十,击掌")
     parser.add_argument("--proactive", action="store_true")
     parser.add_argument("--force", action="store_true", help="跳过 2 分钟冷却（不跳过每日上限）")
     parser.add_argument("--dry-run", action="store_true")
@@ -286,6 +299,7 @@ def main():
         proactive=args.proactive,
         force=args.force,
         dry_run=args.dry_run,
+        prefer=args.prefer,
     )
 
 

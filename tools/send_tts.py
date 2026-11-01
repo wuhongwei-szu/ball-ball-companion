@@ -50,7 +50,7 @@ def _prune_voice():
         pass
 
 
-def generate_mp3(text, voice):
+def generate_mp3(text, voice, rate=None, pitch=None, volume=None):
     if not c.EDGE_TTS_PYTHON or not os.path.isfile(c.EDGE_TTS_PYTHON):
         raise RuntimeError("Edge TTS Python 不存在：请在 bot.config.json 配置 edge_tts_python")
     if len(text) > MAX_TEXT:
@@ -64,12 +64,21 @@ def generate_mp3(text, voice):
     if proxy:
         env["HTTP_PROXY"] = proxy
         env["HTTPS_PROXY"] = proxy
+    rate = c.EDGE_TTS_RATE if rate is None else rate
+    pitch = c.EDGE_TTS_PITCH if pitch is None else pitch
+    volume = c.EDGE_TTS_VOLUME if volume is None else volume
     cmd = [
         c.EDGE_TTS_PYTHON, "-m", "edge_tts",
         "--voice", voice,
         "--text", text,
         "--write-media", out,
     ]
+    if rate:
+        cmd.append(f"--rate={rate}")
+    if pitch:
+        cmd.append(f"--pitch={pitch}")
+    if volume:
+        cmd.append(f"--volume={volume}")
     result = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=90, env=env,
@@ -103,11 +112,11 @@ def _send_xi(path):
     return True
 
 
-def send_voice(target, text, voice, proactive=False, dry_run=False):
+def send_voice(target, text, voice, proactive=False, dry_run=False, rate=None, pitch=None, volume=None):
     text = " ".join(text.split()).strip()
     if not text:
         raise RuntimeError("语音文本为空")
-    path = os.path.join(c.VOICE_DIR, "dry-run.mp3") if dry_run else generate_mp3(text, voice)
+    path = os.path.join(c.VOICE_DIR, "dry-run.mp3") if dry_run else generate_mp3(text, voice, rate, pitch, volume)
     print(f"[voice] {voice} -> {text}")
     if dry_run:
         print(f"[voice] dry-run file={path}")
@@ -136,11 +145,17 @@ def main():
     parser.add_argument("target", choices=["master", "xi"])
     parser.add_argument("text", nargs="+")
     parser.add_argument("--voice", default=c.EDGE_TTS_VOICE)
+    parser.add_argument("--rate", default=None, help="语速，如 -8%%")
+    parser.add_argument("--pitch", default=None, help="音调，如 +5Hz")
+    parser.add_argument("--volume", default=None, help="音量，如 -5%%")
     parser.add_argument("--proactive", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
-        return send_voice(args.target, " ".join(args.text), args.voice, args.proactive, args.dry_run)
+        return send_voice(
+            args.target, " ".join(args.text), args.voice, args.proactive, args.dry_run,
+            args.rate, args.pitch, args.volume,
+        )
     except RuntimeError as exc:
         print(f"语音发送失败：{exc}")
         return 1

@@ -58,6 +58,7 @@ def main():
     parser.add_argument("target", choices=["master", "xi"])
     parser.add_argument("messages", nargs="+", help="每条气泡一句话")
     parser.add_argument("--sticker", help="表情分类；脚本按概率决定发不发")
+    parser.add_argument("--sticker-prefer", help="按标签/文字偏好筛选，如 贴贴,抱,合十,击掌")
     parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
     parser.add_argument("--proactive", action="store_true", help="标记为主动消息，受本地主动安全预算约束")
     parser.add_argument("--probability", type=float, default=0.5, help="发表情的概率（0-1，默认 0.5）")
@@ -118,6 +119,7 @@ def main():
                 proactive=args.proactive,
                 force=args.force_sticker,
                 dry_run=True,
+                prefer=args.sticker_prefer,
             )
         return 0
 
@@ -139,6 +141,7 @@ def main():
             proactive=args.proactive,
             force=args.force_sticker,
             skip_budget=bool(args.proactive),
+            prefer=args.sticker_prefer,
         )
         if code not in (0, 3):
             print("[chat] 文字已送达，表情发送失败；不要重发文字")

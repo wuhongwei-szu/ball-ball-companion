@@ -38,6 +38,9 @@ DEFAULTS = {
     "proactive_min_gap_seconds": 300,
     "edge_tts_python": "",
     "edge_tts_voice": "zh-CN-XiaoxiaoNeural",
+    "edge_tts_rate": "-8%",
+    "edge_tts_pitch": "+5Hz",
+    "edge_tts_volume": "-5%",
     "voice_dir": os.path.join(ROOT, "artifacts", "voice"),
     "proxy": "",
     "codex_home": os.path.join(ROOT, ".codex"),
@@ -149,6 +152,9 @@ WEIXIN_CDN_BASE_URL = CFG["weixin_cdn_base_url"].rstrip("/")
 STICKER_DIR = CFG["sticker_dir"]
 EDGE_TTS_PYTHON = CFG["edge_tts_python"]
 EDGE_TTS_VOICE = CFG["edge_tts_voice"]
+EDGE_TTS_RATE = CFG["edge_tts_rate"]
+EDGE_TTS_PITCH = CFG["edge_tts_pitch"]
+EDGE_TTS_VOLUME = CFG["edge_tts_volume"]
 VOICE_DIR = CFG["voice_dir"]
 STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 12))
 STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 0))

@@ -174,7 +174,7 @@ uv venv .venv-voice --python 3.12
 uv pip install --python .venv-voice\Scripts\python.exe edge-tts
 ```
 
-在 `bot.config.json` 配置 `edge_tts_python`、`edge_tts_voice`（默认 `zh-CN-XiaoxiaoNeural`）和 `voice_dir`，然后：
+在 `bot.config.json` 配置 `edge_tts_python`、`edge_tts_voice`（默认 `zh-CN-XiaoxiaoNeural`）、`edge_tts_rate` / `edge_tts_pitch` / `edge_tts_volume`（默认 `-8%` / `+5Hz` / `-5%`）和 `voice_dir`，然后：
 
 ```bash
 python -X utf8 tools/send_tts.py master "主人，晚安，做个好梦～"

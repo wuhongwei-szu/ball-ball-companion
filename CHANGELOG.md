@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.6 — 2026-11-01
+
+- Add `--sticker-prefer` keyword filtering and allow comfort stickers when the
+  user is down (instead of withholding all stickers).
+- Tune Xiaoxiao defaults to `-8% / +5Hz / -5%` and expose rate/pitch/volume
+  overrides.
+- Add natural-conversation guidance: avoid checklist-style care phrases and
+  read-aloud script tone.
+
 ## v0.2.5 — 2026-11-01
 
 - Add `send_tts.py`: Edge TTS `zh-CN-XiaoxiaoNeural` voice, delivered as an

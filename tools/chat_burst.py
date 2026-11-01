@@ -57,7 +57,7 @@ def main():
     parser.add_argument("target", choices=["master", "xi"])
     parser.add_argument("messages", nargs="+", help="每条气泡一句话")
     parser.add_argument("--sticker", help="表情分类；脚本按概率决定发不发")
-    parser.add_argument("--style", choices=["cat", "pig", "anime", "generic", "text", "silly"])
+    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
     parser.add_argument("--proactive", action="store_true", help="标记为主动消息，表情限额 1 张/天")
     parser.add_argument("--probability", type=float, default=0.33, help="发表情的概率（0-1，默认 0.33）")
     parser.add_argument("--min-delay", type=float, default=0.7)

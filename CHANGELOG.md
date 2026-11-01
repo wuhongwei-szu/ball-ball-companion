@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2 — 2026-11-01
+
+- Add `label`, `category_label`, `style_label`, `tags`, and `animated` to the
+  sticker manifest for easier review and selection.
+- Separate the blue-haired SEIO pack into a `seio` style, cap it at two
+  stickers per category, and put it last in the default style priority.
+
 ## v0.2.1 — 2026-11-01
 
 - Sticker quality pass: skip images below 240px or 20KB to avoid blurry

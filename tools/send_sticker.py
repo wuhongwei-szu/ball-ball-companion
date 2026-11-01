@@ -33,8 +33,8 @@ COOLDOWN_SECONDS = 120
 RECENT_DAYS = 3
 MIN_DIM = 240
 DEFAULT_STYLES = {
-    "master": ("cat", "pig", "anime", "silly", "generic"),
-    "xi": ("cat", "anime", "generic", "text"),
+    "master": ("cat", "pig", "silly", "anime", "generic", "seio"),
+    "xi": ("cat", "silly", "anime", "seio", "generic", "text"),
 }
 
 
@@ -253,7 +253,7 @@ def main():
     parser = argparse.ArgumentParser(description="发送一张本地表情包")
     parser.add_argument("target", nargs="?", choices=["master", "xi"])
     parser.add_argument("--category")
-    parser.add_argument("--style", choices=["cat", "pig", "anime", "generic", "text", "silly"])
+    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
     parser.add_argument("--id", dest="sticker_id")
     parser.add_argument("--proactive", action="store_true")
     parser.add_argument("--force", action="store_true", help="跳过 2 分钟冷却（不跳过每日上限）")

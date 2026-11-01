@@ -37,7 +37,7 @@ MAX_BYTES = 2 * 1024 * 1024
 MIN_BYTES = 20 * 1024
 MIN_DIM = 240
 MAX_DIM = 800
-STYLES = {"cat", "pig", "anime", "generic", "text", "silly"}
+STYLES = {"cat", "pig", "anime", "seio", "generic", "text", "silly"}
 
 CATEGORY_DESCRIPTIONS = {
     "happy": "开心、庆祝、积极反馈、好消息",
@@ -66,7 +66,7 @@ CATEGORY_DESCRIPTIONS = {
 
 PACK_STYLES = {
     "official-001": "generic",
-    "seio": "anime",
+    "seio": "seio",
     "bluefish": "silly",
     "chinesebqb": "generic",
 }
@@ -75,6 +75,7 @@ STYLE_LABELS = {
     "cat": "猫猫",
     "pig": "猪猪",
     "anime": "可爱二次元",
+    "seio": "蓝发二次元（少量）",
     "generic": "通用",
     "text": "文字梗",
     "silly": "大肥鱼/沙雕",

@@ -1,4 +1,6 @@
-# Unreleased
+# Changelog
+
+## v0.2.0 — 2026-11-01
 
 - Add a local sticker library (`sticker_admin.py`) and an agent-facing
   `chat_burst.py` entry with 1-3 bubbles, natural spacing, one optional
@@ -17,8 +19,6 @@
   staged paths instead of blindly publishing `git add -A`.
 - Correct the mistaken attribution of cc-connect local send budget to an official WeChat daily quota.
 - Configure both example Weixin bots with a short send window (20/60s).
-
-# Changelog
 
 ## v0.1.2 — 2026-11-01
 

@@ -124,9 +124,15 @@ _xi_index = int(CFG.get("xi_platform_index", 2))
 if not (1 <= _xi_index <= len(_weixin_platforms)):
     _xi_index = 1
 if _weixin_platforms:
+    MASTER_BOT_ACCOUNT, MASTER_BOT_TOKEN = _weixin_platforms[0]
     XI_BOT_ACCOUNT, XI_BOT_TOKEN = _weixin_platforms[_xi_index - 1]
 else:
+    MASTER_BOT_ACCOUNT, MASTER_BOT_TOKEN = "", ""
     XI_BOT_ACCOUNT, XI_BOT_TOKEN = "", ""
+MASTER_CONTEXT_TOKENS = (
+    os.path.join(DATA_DIR, "weixin", PROJECT, MASTER_BOT_ACCOUNT, "context_tokens.json")
+    if MASTER_BOT_ACCOUNT else ""
+)
 XI_CONTEXT_TOKENS = (
     os.path.join(DATA_DIR, "weixin", PROJECT, XI_BOT_ACCOUNT, "context_tokens.json")
     if XI_BOT_ACCOUNT else ""

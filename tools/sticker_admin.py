@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -69,6 +70,40 @@ PACK_STYLES = {
     "bluefish": "silly",
     "chinesebqb": "generic",
 }
+
+STYLE_LABELS = {
+    "cat": "猫猫",
+    "pig": "猪猪",
+    "anime": "可爱二次元",
+    "generic": "通用",
+    "text": "文字梗",
+    "silly": "大肥鱼/沙雕",
+}
+
+
+def _label_from_path(path):
+    stem = Path(path).stem
+    # ChineseBQB: 是喵星人啦00080-击掌猫 -> 击掌猫; 猪00012-睡了 -> 睡了
+    cleaned = re.sub(r"^.*?\d{3,}[-_ ]*", "", stem)
+    # SEIO/bluefish: 058_得分(10分) -> 得分(10分)
+    cleaned = re.sub(r"^\d+[-_ ]*", "", cleaned)
+    cleaned = cleaned.replace("_", " ").strip(" -_")
+    if not cleaned or re.fullmatch(r"[0-9a-fA-Fx]+", cleaned):
+        return ""
+    if re.fullmatch(r"s\d+-\d+", cleaned, re.I) or re.fullmatch(r"file\s*\d+", cleaned, re.I):
+        return ""
+    return cleaned[:24]
+
+
+def _tags_for(entry, label, animated):
+    tags = [entry["category"], entry["style"], entry["source"]]
+    tags.append("动图" if animated else "静态")
+    if label:
+        for token in re.split(r"[^\w一-鿿]+", label):
+            token = token.strip()
+            if len(token) >= 2 and token not in tags:
+                tags.append(token)
+    return tags[:8]
 
 
 def _rel(path, root):
@@ -177,25 +212,33 @@ def scan():
             continue
         seen.add(digest)
         pack, category, style = _infer_meta(path, c.STICKER_DIR)
-        entries.append({
+        animated = os.path.splitext(path)[1].lower() == ".gif"
+        label = _label_from_path(path) or f"官方·{digest[:4]}"
+        entry = {
             "id": f"{pack}_{digest[:8]}",
             "file": rel,
             "category": category,
+            "category_label": CATEGORY_DESCRIPTIONS[category],
             "style": style,
+            "style_label": STYLE_LABELS.get(style, style),
+            "label": label,
             "source": pack,
             "format": info[2].lower(),
+            "animated": animated,
             "width": info[0],
             "height": info[1],
             "bytes": size,
             "sha256": digest,
             "added_at": datetime.now().strftime("%Y-%m-%d"),
-        })
+        }
+        entry["tags"] = _tags_for(entry, label, animated)
+        entries.append(entry)
     entries.sort(key=lambda e: (e["category"], e["style"], e["id"]))
     counts = {}
     for entry in entries:
         counts[entry["category"]] = counts.get(entry["category"], 0) + 1
     manifest = {
-        "version": 1,
+        "version": 2,
         "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "categories": {
             key: {"description": desc, "count": counts.get(key, 0)}

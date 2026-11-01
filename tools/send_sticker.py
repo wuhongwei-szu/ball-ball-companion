@@ -57,14 +57,17 @@ def target_state(usage, target):
 
 
 def _now():
-    return datetime.datetime.now()
+    return datetime.datetime.now().astimezone()
 
 
 def _parse_at(value):
     try:
-        return datetime.datetime.fromisoformat(value)
+        parsed = datetime.datetime.fromisoformat(value)
     except Exception:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_now().tzinfo)
+    return parsed
 
 
 def _today():
@@ -140,8 +143,9 @@ def _select_candidate(manifest, category, style, sticker_id, state):
         if isinstance(item, dict):
             at = _parse_at(item.get("at", ""))
             if at:
-                last_used[item.get("id", "")] = max(at, last_used.get(item.get("id", ""), at))
-    pool.sort(key=lambda e: last_used.get(e.get("id", ""), datetime.datetime.min))
+                key = item.get("id", "")
+                last_used[key] = max(at.timestamp(), last_used.get(key, 0.0))
+    pool.sort(key=lambda e: last_used.get(e.get("id", ""), 0.0))
     head = pool[: max(1, min(8, len(pool)))]
     return random.choice(head)
 

@@ -1,3 +1,8 @@
+# Unreleased
+
+- Correct the mistaken attribution of cc-connect local send budget to an official WeChat daily quota.
+- Configure both example Weixin bots with a short send window (20/60s).
+
 # Changelog
 
 ## v0.1.2 — 2026-11-01

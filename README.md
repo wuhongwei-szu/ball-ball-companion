@@ -12,7 +12,7 @@
 | 双 bot 共享人格 | 两个微信 bot 共用同一份 persona 与长期记忆，各自保留对话笔记 |
 | 多气泡聊天 | 用 `send_msg.py` 逐条发送 2-3 条短消息，最后用 `NO_REPLY` 抑制多余回复 |
 | 事件提醒 | 说“下周二体测”，确认日期后用 cc-connect 内置 `timer` 到点提醒 |
-| 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；主动发送额度约 4-6 条/24h，关怀上限 2 次 |
+| 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；关怀上限 2 次；本地发送预算使用短窗口 |
 | 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
@@ -155,8 +155,9 @@ python -X utf8 tools/add_reminder.py --owner master \
 08:30-21:30，间隔至少 2 小时。每次机会只是“可以关心”，agent 判断有真实
 上下文才发，否则 `NO_REPLY`。因此某天可能 0 条，某天可能两条。
 
-WeChat ilink 对主动发送有额度（约 4-6 条/24h，具体由平台决定）；每日要闻、
-事件提醒和关怀共用这个额度。关怀默认上限 2 次，发送失败时不要重试。
+cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/24小时预算。
+示例配置改为 burst_limit=20、burst_window_secs=60，保留短时保护。
+这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。关怀上限仍为 2 次。
 
 ### 记忆
 
@@ -210,8 +211,8 @@ memory、config、日志或 token。
 - **“⏳ 消息发送过快，请稍后再试”** — cc-connect's per-session incoming rate limit
   (default 20 messages / 60 seconds). For a trusted single-user deployment set
   `[rate_limit] max_messages = 0` in `config.toml`, or wait a minute.
-- **“send budget exhausted”** — WeChat ilink limits proactive sends to roughly
-  4-6 per 24 hours. Reduce proactive messages, wait for the window, or re-login
+- **“send budget exhausted”** — cc-connect local send guard, including normal replies in v1.5.0.
+  Configure each Weixin platform with `burst_limit=20` and `burst_window_secs=60`; do not re-login
   the bot. Care is capped at 2/day by default.
 - **“no stored context_token”** — the recipient must message that bot first;
   WeChat does not allow a bot to start a conversation.
@@ -219,3 +220,6 @@ memory、config、日志或 token。
 ## License
 
 MIT — see [LICENSE](LICENSE). Attribution and design references: [NOTICE.md](NOTICE.md).
+
+
+The local quota regression is tracked in [upstream issue #1742](https://github.com/chenhg5/cc-connect/issues/1742). A generated response in history is not proof of delivery. API content rejection, local quota failure, and accepted-but-not-visible gateway delivery are separate outcomes.

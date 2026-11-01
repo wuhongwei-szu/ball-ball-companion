@@ -50,6 +50,9 @@ codex = { wire_api = "responses" }
 type = "weixin"
 
 [projects.platforms.options]
+# cc-connect v1.5.0 also counts normal replies; use a short local window.
+burst_limit = 20
+burst_window_secs = 60
 token = "botA@im.bot:REPLACE_ME"
 base_url = "https://ilinkai.weixin.qq.com"
 account_id = "botA@im.bot"
@@ -60,6 +63,9 @@ allow_from = "<OWNER_OPENID>@im.wechat"
 type = "weixin"
 
 [projects.platforms.options]
+# cc-connect v1.5.0 also counts normal replies; use a short local window.
+burst_limit = 20
+burst_window_secs = 60
 token = "botB@im.bot:REPLACE_ME"
 base_url = "https://ilinkai.weixin.qq.com"
 account_id = "botB@im.bot"

@@ -28,8 +28,7 @@ via `send_msg.py`, and ends with `NO_REPLY`.
 - A day with 0 opportunities sends nothing.
 - Times are random between 08:30 and 21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
-- Capped at 2/day because WeChat ilink throttles proactive sends to roughly
-  4-6 per 24h (daily news and event reminders share the same budget).
+- Capped at 2/day to avoid unsolicited interruptions; this is a product setting, not a verified WeChat daily quota.
 - Each opportunity is only a chance: the agent decides from `STATE.md`,
   `MEMORY.md`, `EVENTS.md`, and recent raw context whether there is a real
   reason to message. If not, it replies `NO_REPLY`.
@@ -56,5 +55,4 @@ Edit the constants in `care_scheduler.py`:
 - `消息发送过快，请稍后再试` — cc-connect's incoming per-session rate limit
   (default 20/60s), not the model. Set `[rate_limit] max_messages = 0` for a
   trusted single user, or wait.
-- `send budget exhausted` — WeChat ilink's proactive send budget (~4-6/24h);
-  reduce sends or re-login the bot.
+- `send budget exhausted` — local cc-connect guard; v1.5.0 counts replies too. Use `burst_limit=20` and `burst_window_secs=60` per Weixin platform. Gateway rejections must be handled separately; do not repeatedly retry.

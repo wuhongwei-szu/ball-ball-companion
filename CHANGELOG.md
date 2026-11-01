@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.3 — 2026-11-01
+
+- Make local send limits configurable; `0` means unlimited for
+  `sticker_daily_limit`, `sticker_proactive_daily_limit`, and
+  `sticker_cooldown_seconds`; remove hard bubble caps in `chat_burst.py`.
+- Raise care opportunities to 0-4/day and document that iLink's server-side
+  `ret=-2` throttle cannot be removed locally; stop and wait instead of
+  retrying.
+
 ## v0.2.2 — 2026-11-01
 
 - Add `label`, `category_label`, `style_label`, `tags`, and `animated` to the

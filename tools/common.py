@@ -33,6 +33,7 @@ DEFAULTS = {
     "sticker_dir": os.path.join(ROOT, "assets", "stickers"),
     "sticker_daily_limit": 3,
     "sticker_proactive_daily_limit": 1,
+    "sticker_cooldown_seconds": 0,
     "proxy": "",
     "codex_home": os.path.join(ROOT, ".codex"),
     "codex_wrapper": os.path.join(ROOT, "bin", "codex.exe"),
@@ -143,6 +144,7 @@ WEIXIN_CDN_BASE_URL = CFG["weixin_cdn_base_url"].rstrip("/")
 STICKER_DIR = CFG["sticker_dir"]
 STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 3))
 STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 1))
+STICKER_COOLDOWN_SECONDS = int(CFG.get("sticker_cooldown_seconds", 0))
 PROXY = CFG["proxy"]
 CODEX_HOME = CFG["codex_home"]
 CODEX_WRAPPER = CFG["codex_wrapper"]

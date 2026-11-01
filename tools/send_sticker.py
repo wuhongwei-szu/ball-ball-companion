@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 MANIFEST = os.path.join(c.STICKER_DIR, "manifest.json")
-COOLDOWN_SECONDS = 120
+COOLDOWN_SECONDS = c.STICKER_COOLDOWN_SECONDS
 RECENT_DAYS = 3
 MIN_DIM = 240
 DEFAULT_STYLES = {
@@ -221,14 +221,14 @@ def send_one(target, category=None, style=None, sticker_id=None,
     usage = load_usage()
     state = target_state(usage, target)
     sent = state.get("sent", [])
-    if _count_today(sent) >= c.STICKER_DAILY_LIMIT:
+    if c.STICKER_DAILY_LIMIT > 0 and _count_today(sent) >= c.STICKER_DAILY_LIMIT:
         print(f"今天表情额度用完了（{c.STICKER_DAILY_LIMIT}/{c.STICKER_DAILY_LIMIT}），这次只发文字")
         return 3
-    if proactive and _count_today(sent, proactive=True) >= c.STICKER_PROACTIVE_DAILY_LIMIT:
-        print("今天主动消息的表情额度已用完（1/1），这次只发文字")
+    if proactive and c.STICKER_PROACTIVE_DAILY_LIMIT > 0 and _count_today(sent, proactive=True) >= c.STICKER_PROACTIVE_DAILY_LIMIT:
+        print("今天主动消息的表情额度已用完，这次只发文字")
         return 3
     last = _last_sent(sent)
-    if last and not force:
+    if COOLDOWN_SECONDS > 0 and last and not force:
         elapsed = (_now().astimezone() - last.astimezone()).total_seconds()
         if elapsed < COOLDOWN_SECONDS:
             print(f"刚发过表情（{int(elapsed)} 秒前），这次先不发")

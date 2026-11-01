@@ -13,7 +13,7 @@
 | 多气泡聊天 | 用 `chat_burst.py` 发 1-3 条短消息并带自然停顿，最后用 `NO_REPLY` 抑制多余回复 |
 | 表情包 | 本地分类图库；脚本按概率、冷却、每日上限决定发不发；图片算独立出站消息 |
 | 事件提醒 | 说“下周二体测”，确认日期后用 cc-connect 内置 `timer` 到点提醒 |
-| 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；关怀上限 2 次；本地发送预算使用短窗口 |
+| 随机关怀 | 每天随机 0-4 次机会（45/30/15/8/2），时间在 08:30-21:30，23:00-07:00 安静；不设本地发送额度 |
 | 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
@@ -146,7 +146,7 @@ python -X utf8 tools/chat_burst.py master --sticker affection \
   "主人，辛苦啦～" "今天是不是又忙了一整天？(｡•́︿•̀｡)"
 ```
 
-- 表情只是“候选”：脚本按 1/3 概率、2 分钟冷却、每 bot 每天 3 张上限决定发不发；主动消息最多 1 张/天。
+- 表情是否发由 agent 和图库决定；`sticker_daily_limit`、`sticker_proactive_daily_limit`、`sticker_cooldown_seconds` 可设为 `0` 表示不限制（示例默认 3/1/0）。iLink 服务端仍可能以 `ret=-2` 节流。
 - 图片是独立出站消息，和文字一起计入条数上限（最多 3 条文字 + 1 张表情）。
 - 无合适分类、额度用完、刚发过时只发文字；不要重试。
 - 简单确认或严肃说明用单条 `send_msg.py`，不要硬拆。
@@ -177,15 +177,16 @@ python -X utf8 tools/add_reminder.py --owner master \
 
 ### 随机关怀
 
-`care_scheduler.py` 每天 08:17 规划 0-2 次机会（55/32/13），时间随机在
+`care_scheduler.py` 每天 08:17 规划 0-4 次机会（45/30/15/8/2），时间随机在
 08:30-21:30，间隔至少 2 小时。每次机会只是“可以关心”，agent 判断有真实
-上下文才发，否则 `NO_REPLY`。因此某天可能 0 条，某天可能两条。
+上下文才发，否则 `NO_REPLY`。不设本地发送额度。
 
 cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/24小时预算。
 示例配置改为 burst_limit=20、burst_window_secs=60，保留短时保护。
-这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。关怀上限仍为 2 次。
-主动消息优先用 `chat_burst.py --proactive`；带表情最多 1 张/天，最近两次主动
-消息对方都没回时暂停。
+这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。关怀机会默认
+0-4 次/天，可按需调整，不设本地发送额度。
+主动消息优先用 `chat_burst.py --proactive`；表情和气泡数量由 agent 按语境决定，
+iLink 服务端仍可能以 `ret=-2` 节流。
 
 ### 记忆
 
@@ -242,7 +243,7 @@ memory、config、日志或 token。
   `[rate_limit] max_messages = 0` in `config.toml`, or wait a minute.
 - **“send budget exhausted”** — cc-connect local send guard, including normal replies in v1.5.0.
   Configure each Weixin platform with `burst_limit=20` and `burst_window_secs=60`; do not re-login
-  the bot. Care is capped at 2/day by default.
+  the bot. Care opportunities default to 0-4/day; local send caps can be set to 0 (unlimited), but iLink may still throttle.
 - **“no stored context_token”** — the recipient must message that bot first;
   WeChat does not allow a bot to start a conversation.
 - **表情只出现文字/完全没发** — 检查 `sticker_admin.py validate`、每日上限/冷却，以及

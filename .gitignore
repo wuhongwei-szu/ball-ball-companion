@@ -10,6 +10,11 @@ memory/
 logs/
 sessions/
 backups/
+
+# Local sticker assets and generated artifacts (never publish)
+/assets/
+/artifacts/
+
 *.log
 *.zip
 *.sqlite

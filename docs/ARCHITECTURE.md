@@ -14,15 +14,20 @@
 
 1. A user sends a WeChat message.
 2. cc-connect maps the user to a session (`s1` or `s2`) and runs the agent.
-3. The agent replies with one or more `send_msg.py` calls and ends with
-   `NO_REPLY`; cc-connect suppresses the final marker.
-4. `send_msg.py` writes the outgoing bubbles to `memory/raw/s1|s2/` and
-   `memory/recent_replies.md` (redacted).
+3. The agent replies with `chat_burst.py` (1-3 bubbles + optional sticker) or
+   one `send_msg.py` call, then ends with `NO_REPLY`; cc-connect suppresses the
+   final marker.
+4. `send_msg.py` / `chat_burst.py` write outgoing bubbles to
+   `memory/raw/s1|s2/` and `memory/recent_replies.md` (redacted);
+   `send_sticker.py` records sticker usage and quotas.
 5. Every five minutes `capture_transcripts.py` appends new user/assistant
    messages from the cc-connect session JSON to `memory/raw/`.
 6. At 03:17 the memory consolidation cron reads raw/notes and updates
-   `MEMORY.md`, `EVENTS.md`, and `STATE.md`; it can create future reminders.
+   `MEMORY.md`, `EVENTS.md`, `STATE.md`, and `THREADS.md`; it can create
+   future reminders.
 7. At 08:17 `care_scheduler.py` plans 0-3 random care timers for the day.
+   Proactive sends use `chat_burst.py --proactive`; stickers are capped at one
+   per day and proactive messages pause after two unanswered attempts.
 
 ## Configuration
 

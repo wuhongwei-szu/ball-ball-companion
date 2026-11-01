@@ -38,6 +38,7 @@ Copy-Safe (Join-Path $BotRoot "PERSONA.md") $botDir
 Copy-Safe (Join-Path $BotRoot "AGENTS.md") $botDir
 Copy-Safe (Join-Path $BotRoot "memory") $botDir
 Copy-Safe (Join-Path $BotRoot "tools") $botDir
+Copy-Safe (Join-Path $BotRoot "assets") $botDir
 Copy-Safe (Join-Path $BotRoot "config\bot.config.json") $botDir
 
 # Isolated Codex config (auth.json intentionally excluded)

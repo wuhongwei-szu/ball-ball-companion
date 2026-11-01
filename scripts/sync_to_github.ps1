@@ -17,9 +17,10 @@ if (-not (Test-Path -LiteralPath $toolsSrc)) {
 New-Item -ItemType Directory -Force -Path $toolsDst | Out-Null
 
 $names = @(
-    "common.py", "send_msg.py", "send_xi.py", "add_reminder.py",
-    "care_scheduler.py", "capture_transcripts.py", "healthcheck.py",
-    "backup.ps1", "setup_tasks.ps1"
+    "common.py", "send_msg.py", "send_xi.py", "send_sticker.py",
+    "chat_burst.py", "sticker_admin.py", "memory_search.py",
+    "add_reminder.py", "care_scheduler.py", "capture_transcripts.py",
+    "healthcheck.py", "backup.ps1", "setup_tasks.ps1"
 )
 foreach ($name in $names) {
     $src = Join-Path $toolsSrc $name
@@ -41,6 +42,13 @@ try {
     }
 
     git add -A
+    $staged = @(git diff --cached --name-only)
+    $allowed = '^(tools/|deploy/|docs/|prompts/|scripts/|config/.*example.*|README\.md$|CHANGELOG\.md$|\.gitignore$|LICENSE$|NOTICE\.md$|SECURITY\.md$|CONTRIBUTING\.md$|\.github/)'
+    $unexpected = @($staged | Where-Object { $_ -and ($_ -notmatch $allowed) })
+    if ($unexpected.Count -gt 0) {
+        git reset | Out-Null
+        throw ("Unexpected staged files; refusing to commit: " + ($unexpected -join ", "))
+    }
     git diff --cached --quiet
     if ($LASTEXITCODE -eq 0) {
         Write-Output "No changes to publish."

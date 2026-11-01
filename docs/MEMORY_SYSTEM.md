@@ -7,8 +7,10 @@
 | `memory/raw/s1|s2/YYYY-MM-DD.md` | Redacted raw transcripts |
 | `memory/notes/s1|s2/YYYY-MM-DD.md` | Daily notes written by the agent |
 | `memory/MEMORY.md` | Shared long-term memory |
-| `memory/STATE.md` | Mood / energy / relationship temperature |
+| `memory/STATE.md` | Mood label / energy / relationship temperature / small daily note (≤8 lines) |
 | `memory/EVENTS.md` | Important dates and commitments |
+| `memory/THREADS.md` | Open topics and commitments worth following up (≤10) |
+| `memory/sticker_usage.json` | Sticker send history and daily quotas |
 | `memory/recent_replies.md` | Last 20 assistant messages |
 | `memory/CONFLICTS.md` | Contradictions waiting for a human decision |
 | `memory/reminders.json` | Locally created reminder index |
@@ -21,10 +23,12 @@
 2. **Send logging** — `send_msg.py` appends each outgoing bubble to raw and
    recent replies.
 3. **Consolidate** — the `memcons01` cron runs at 03:17, reads recent raw and
-   notes, updates `MEMORY.md`, `EVENTS.md`, `STATE.md`, and can create future
-   reminders.
+   notes, updates `MEMORY.md`, `EVENTS.md`, `STATE.md`, `THREADS.md`, and can
+   create future reminders.
 4. **Recall** — a new agent thread reads `PERSONA.md`, `MEMORY.md`, `STATE.md`,
-   and `recent_replies.md` before its first reply.
+   `THREADS.md`, and `recent_replies.md` before its first reply. For older
+   details, `memory_search.py "关键词"` returns a few short snippets; if nothing
+   matches, say so instead of guessing.
 
 ## Redaction
 

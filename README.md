@@ -1,6 +1,6 @@
 # Ball Ball Companion
 
-一个可自托管的微信 AI 陪伴机器人：**两个微信 bot、共享人格与长期记忆、多条短消息、一次性提醒、随机关怀**。
+一个可自托管的微信 AI 陪伴机器人：**两个微信 bot、共享人格与长期记忆、自然多气泡、表情包、一次性提醒、随机关怀**。
 
 项目由 cc-connect 1.5.x 桥接微信，Codex CLI 作为本地 agent，默认使用 `gpt-6-luna`。
 仓库只包含通用代码、模板和文档；**不包含任何 token、openid、API key、聊天记忆或私人配置**。
@@ -10,10 +10,11 @@
 | 能力 | 说明 |
 |---|---|
 | 双 bot 共享人格 | 两个微信 bot 共用同一份 persona 与长期记忆，各自保留对话笔记 |
-| 多气泡聊天 | 用 `send_msg.py` 逐条发送 2-3 条短消息，最后用 `NO_REPLY` 抑制多余回复 |
+| 多气泡聊天 | 用 `chat_burst.py` 发 1-3 条短消息并带自然停顿，最后用 `NO_REPLY` 抑制多余回复 |
+| 表情包 | 本地分类图库；脚本按概率、冷却、每日上限决定发不发；图片算独立出站消息 |
 | 事件提醒 | 说“下周二体测”，确认日期后用 cc-connect 内置 `timer` 到点提醒 |
 | 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；关怀上限 2 次；本地发送预算使用短窗口 |
-| 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` |
+| 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
 | 运维 | 隐藏自启、5 分钟看门狗、每日备份、日志轮转、只读健康检查 |
@@ -33,17 +34,24 @@ work_dir/
 ├── PERSONA.md                 # 人格（由 prompts/PERSONA.template.md 渲染）
 ├── memory/
 │   ├── MEMORY.md              # 共享长期记忆
-│   ├── STATE.md               # 心情/精力/关系温度
+│   ├── STATE.md               # 心情/精力/关系温度/小日常
 │   ├── EVENTS.md              # 重要日子与约定
+│   ├── THREADS.md             # 未完话题与约定（主动关心素材）
+│   ├── sticker_usage.json     # 表情发送历史/每日额度
 │   ├── raw/s1|s2/             # 对话原文（自动脱敏）
 │   ├── notes/s1|s2/           # 每日笔记
 │   ├── reminders.json         # 已创建提醒索引
 │   ├── recent_replies.md      # 最近 20 条回复
 │   └── .care_plan.json        # 当天随机关怀计划
+├── assets/stickers/           # 本地表情库（不入公开仓库）
 └── tools/
     ├── common.py              # 配置加载与会话/token 运行时推导
-    ├── send_msg.py            # 逐条发送 + 写原文
-    ├── send_xi.py             # 直连第二个 bot 的 ilink API
+    ├── chat_burst.py          # 统一的多气泡 + 表情发送入口
+    ├── send_sticker.py        # 选图/额度/冷却 + 发送一张表情
+    ├── sticker_admin.py       # 表情库 scan/validate/list/catalog/import
+    ├── memory_search.py       # 本地记忆关键词检索
+    ├── send_msg.py            # 单条发送 + 写原文
+    ├── send_xi.py             # 直连第二个 bot 的 ilink API（文本/图片）
     ├── add_reminder.py        # 创建一次性提醒（复用 cc-connect timer）
     ├── care_scheduler.py      # 每天规划 0-3 次随机关怀
     ├── capture_transcripts.py # 捕获新对话
@@ -56,6 +64,7 @@ work_dir/
 
 - Windows 10/11（部署脚本以 PowerShell 为主）
 - Python 3.11+
+- Python 包：`cryptography`（第二个 bot 发图必需）；`Pillow`（表情库缩图可选）
 - cc-connect **1.5.x**（示例使用 1.5.0）
 - Codex CLI（桌面版自带或 `npm install -g @openai/codex`）
 - 两个微信 ilink bot（cc-connect 的 `weixin` 平台）
@@ -128,15 +137,31 @@ work_dir/
 
 ## 使用
 
-### 多条短消息
+### 多条短消息与表情
 
-机器人用 `send_msg.py` 逐条发送，最后回复 `NO_REPLY`：
+机器人优先用 `chat_burst.py` 发 1-3 条短消息，中间随机停顿；可在最后附一张本地表情：
 
 ```bash
-python -X utf8 tools/send_msg.py master "主人，辛苦啦～"
-python -X utf8 tools/send_msg.py master "今天是不是又忙了一整天？(｡•́︿•̀｡)"
-python -X utf8 tools/send_msg.py master "先喝点水，球球陪你歇一会儿 🌙"
+python -X utf8 tools/chat_burst.py master --sticker affection \
+  "主人，辛苦啦～" "今天是不是又忙了一整天？(｡•́︿•̀｡)"
 ```
+
+- 表情只是“候选”：脚本按 1/3 概率、2 分钟冷却、每 bot 每天 3 张上限决定发不发；主动消息最多 1 张/天。
+- 图片是独立出站消息，和文字一起计入条数上限（最多 3 条文字 + 1 张表情）。
+- 无合适分类、额度用完、刚发过时只发文字；不要重试。
+- 简单确认或严肃说明用单条 `send_msg.py`，不要硬拆。
+
+### 表情库
+
+表情素材只放本地，不进入公开仓库。首次使用：
+
+```bash
+python -X utf8 tools/sticker_admin.py scan
+python -X utf8 tools/sticker_admin.py validate
+python -X utf8 tools/sticker_admin.py list
+```
+
+用 `import` 导入自己的图库；用 `catalog` 生成分类说明。`send_xi.py --image` 直连第二个 bot 的 iLink 媒体上传，避免 cc-connect 多 bot 路由到错误的账号。
 
 ### 事件提醒
 
@@ -158,16 +183,19 @@ python -X utf8 tools/add_reminder.py --owner master \
 cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/24小时预算。
 示例配置改为 burst_limit=20、burst_window_secs=60，保留短时保护。
 这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。关怀上限仍为 2 次。
+主动消息优先用 `chat_burst.py --proactive`；带表情最多 1 张/天，最近两次主动
+消息对方都没回时暂停。
 
 ### 记忆
 
 `capture_transcripts.py` 每 5 分钟捕获新消息到 `memory/raw/`；每晚 03:17 的
-`memcons01` 整理到 `MEMORY.md` / `EVENTS.md` / `STATE.md`。所有写入前自动脱敏。
-详见 [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)。
+`memcons01` 整理到 `MEMORY.md` / `EVENTS.md` / `STATE.md` / `THREADS.md`。
+需要旧细节时用 `memory_search.py "关键词"` 检索，找不到就如实说。
+所有写入前自动脱敏。详见 [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)。
 
 ## 隐私与安全
 
-- **不提交**：bot token、openid、API key、聊天记录、日志、session、备份、`config/bot.config.json`。
+- **不提交**：bot token、openid、API key、聊天记录、日志、session、备份、`config/bot.config.json`、本地表情素材/生成图片（`assets/`、`artifacts/`）。
 - 私有值只存在 `%USERPROFILE%\.cc-connect\` 和本地 `config/bot.config.json`。
 - `common.py` 在运行时从 cc-connect 配置和 session 文件推导 token/openid，**不落盘**。
 - `capture_transcripts.py` / `send_msg.py` 写入前做密钥/token/密码脱敏。
@@ -216,6 +244,11 @@ memory、config、日志或 token。
   the bot. Care is capped at 2/day by default.
 - **“no stored context_token”** — the recipient must message that bot first;
   WeChat does not allow a bot to start a conversation.
+- **表情只出现文字/完全没发** — 检查 `sticker_admin.py validate`、每日上限/冷却，以及
+  `sticker_usage.json`；iLink 没有原生表情气泡，GIF 是否动图取决于微信端，不能保证。
+- **第二个 bot 发图失败** — `send_xi.py` 需要该用户最近给 bot 发过消息；`ret=-2`
+  可能是节流，不要重试；等对方再发一条消息或稍后再试。
+- **图片太大** — 图库导入会跳过 >2MB 的图；用 `sticker_admin.py scan` 重新校验。
 
 ## License
 

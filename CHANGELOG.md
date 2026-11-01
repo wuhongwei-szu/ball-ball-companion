@@ -1,5 +1,20 @@
 # Unreleased
 
+- Add a local sticker library (`sticker_admin.py`) and an agent-facing
+  `chat_burst.py` entry with 1-3 bubbles, natural spacing, one optional
+  sticker, a 1/3 probability, a cooldown, and per-bot daily caps.
+- Add `send_sticker.py`; the secondary bot uses a direct iLink image upload
+  (AES-128-ECB + CDN + `image_item`) to avoid cc-connect's multi-bot routing.
+- Extend `send_xi.py` with `--image` and treat `ret=-2` as throttle/session
+  trouble without retrying.
+- Add `memory/THREADS.md`, an 8-line `STATE.md`, and `memory_search.py` for
+  lightweight recall; nightly consolidation now maintains THREADS and the new
+  STATE format.
+- Proactive care/reminders use `chat_burst.py --proactive`; stickers are
+  capped at one per day, and proactive messages pause after two unanswered
+  attempts.
+- Local sticker assets are ignored by the public repository; sync now checks
+  staged paths instead of blindly publishing `git add -A`.
 - Correct the mistaken attribution of cc-connect local send budget to an official WeChat daily quota.
 - Configure both example Weixin bots with a short send window (20/60s).
 

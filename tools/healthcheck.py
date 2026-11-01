@@ -79,6 +79,19 @@ def main():
         if not os.path.isfile(path):
             ok = False
 
+    manifest_path = os.path.join(c.STICKER_DIR, "manifest.json")
+    sticker_count = 0
+    if os.path.isfile(manifest_path):
+        data = c.load_json(manifest_path, {}) or {}
+        stickers = data.get("stickers", [])
+        sticker_count = len(stickers) if isinstance(stickers, list) else 0
+    print(f"[{'OK' if sticker_count > 0 else '!!'}] 表情库: {sticker_count} 张 ({c.STICKER_DIR})")
+    if sticker_count <= 0:
+        ok = False
+
+    threads = os.path.join(c.MEMORY_DIR, "THREADS.md")
+    print(f"[{'OK' if os.path.isfile(threads) else '--'}] 未完话题: THREADS.md")
+
     last = os.path.join(c.MEMORY_DIR, "last-consolidation.txt")
     if os.path.isfile(last):
         lines = [l.strip() for l in open(last, encoding="utf-8") if l.strip()]

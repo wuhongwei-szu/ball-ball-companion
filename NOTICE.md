@@ -33,6 +33,13 @@ from them is copied, except where explicitly noted.
   <https://github.com/leon-ai/leon>
 - **whalecare** — quiet hours and adaptive proactive pacing:
   <https://pypi.org/project/whalecare/0.1.24/>
+- **AstrBot meme_manager** — category-described sticker packs, one-shot send
+  probability, and per-session sticker rules informed `sticker_admin.py` and
+  `chat_burst.py`: <https://github.com/anka-afk/astrbot_plugin_meme_manager>
+- **AstrBot private_companion / LivingMemory** — continuous state, open-thread
+  follow-ups, and lightweight recall informed `STATE.md`, `THREADS.md`, and
+  `memory_search.py`: <https://github.com/menglimi/astrbot_plugin_private_companion>,
+  <https://github.com/lxfight-s-astrbot-plugins/astrbot_plugin_livingmemory>
 - **Rho / CompanionBot / Zubo / Pulse / Mercury** — heartbeat and proactive
   agent patterns referenced during design.
 

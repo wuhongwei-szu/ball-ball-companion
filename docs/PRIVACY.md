@@ -18,6 +18,7 @@ Only generic code, templates, and documentation. It contains **no**:
 | Session data | `%USERPROFILE%\.cc-connect\sessions\` | No |
 | Bot paths / session IDs | `config/bot.config.json` | No (gitignored) |
 | Long-term memory / raw chats | `memory/` | No (gitignored) |
+| Local stickers / generated images | `assets/`, `artifacts/` | No (gitignored) |
 | Logs / backups | `logs/`, `backups/` | No (gitignored) |
 | API key | environment variable / local `.env` | No |
 

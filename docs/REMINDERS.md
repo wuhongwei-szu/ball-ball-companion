@@ -12,8 +12,10 @@ python -X utf8 tools/add_reminder.py \
 
 It creates a `timer add --at ...` job targeting the owner's session. At the
 due time cc-connect injects a prompt into a fresh side session; the agent
-reads `PERSONA.md` / `MEMORY.md` / `STATE.md`, writes a personalized reminder
-via `send_msg.py`, and ends with `NO_REPLY`.
+reads `PERSONA.md` / `MEMORY.md` / `STATE.md` / `THREADS.md`, writes a
+personalized reminder via `chat_burst.py --proactive`, and ends with
+`NO_REPLY`. A sticker is optional; it counts toward the “1 proactive sticker
+per day” cap and should be omitted for urgent or serious reminders.
 
 - `--owner master|xi|both`
 - Rejects times in 23:00-07:00 unless `--allow-night`
@@ -30,8 +32,12 @@ via `send_msg.py`, and ends with `NO_REPLY`.
 - No proactive care at 23:00-07:00.
 - Capped at 2/day to avoid unsolicited interruptions; this is a product setting, not a verified WeChat daily quota.
 - Each opportunity is only a chance: the agent decides from `STATE.md`,
-  `MEMORY.md`, `EVENTS.md`, and recent raw context whether there is a real
-  reason to message. If not, it replies `NO_REPLY`.
+  `MEMORY.md`, `EVENTS.md`, `THREADS.md`, and recent raw context whether there
+  is a real reason to message. If not, it replies `NO_REPLY`.
+- Proactive messages use `chat_burst.py --proactive`; a sticker is optional,
+  at most one per day, and only with a clear context.
+- If the last two proactive messages got no reply, pause proactive messages
+  until the user speaks again.
 
 This follows patterns from SillyTavern Time-Awareness (probabilistic triggers),
 dsh-proactive / whalecare (daily limit and quiet hours), and cc-connect timers.

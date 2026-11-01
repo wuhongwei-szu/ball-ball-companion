@@ -37,8 +37,8 @@ def save_index(items):
 def build_prompt(owner, when_text, title, note):
     label = c.LABELS.get(owner, owner)
     return f"""【定时提醒】现在是 {when_text}。提醒对象：{label}。事项：{title}。备注：{note}。
-请参考 {c.WORK_DIR}/PERSONA.md、memory/MEMORY.md、memory/STATE.md 和最近原文，用 1-2 条自然的微信短消息提醒对方，结合对方近况，不要模板化，不要提“定时/系统任务”。
-用 python -X utf8 {c.WORK_DIR}/tools/send_msg.py {owner} "..." 发送；最后只回复 NO_REPLY。"""
+请参考 {c.WORK_DIR}/PERSONA.md、memory/MEMORY.md、memory/STATE.md、memory/THREADS.md 和最近原文，用 1-2 条自然的微信短消息提醒对方，结合对方近况，不要模板化，不要提“定时/系统任务”。
+用 python -X utf8 {c.WORK_DIR}/tools/chat_burst.py {owner} --proactive [--sticker <分类>] "第一句" "第二句" 发送；事情紧急或严肃时不要加表情，表情最多 1 张/天；没有合适分类就纯文字。最后只回复 NO_REPLY。"""
 
 
 def add_one(owner, when, title, note, items):

@@ -29,6 +29,10 @@ DEFAULTS = {
     "xi_session_id": "s2",
     "xi_platform_index": 2,
     "weixin_api_url": "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
+    "weixin_cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
+    "sticker_dir": os.path.join(ROOT, "assets", "stickers"),
+    "sticker_daily_limit": 3,
+    "sticker_proactive_daily_limit": 1,
     "proxy": "",
     "codex_home": os.path.join(ROOT, ".codex"),
     "codex_wrapper": os.path.join(ROOT, "bin", "codex.exe"),
@@ -38,7 +42,7 @@ DEFAULTS = {
 
 PATH_KEYS = {
     "work_dir", "cc_data_dir", "cc_bin", "cc_config_file", "session_file",
-    "codex_home", "codex_wrapper",
+    "sticker_dir", "codex_home", "codex_wrapper",
 }
 
 
@@ -128,6 +132,11 @@ XI_CONTEXT_TOKENS = (
     if XI_BOT_ACCOUNT else ""
 )
 WEIXIN_API_URL = CFG["weixin_api_url"]
+WEIXIN_API_BASE = WEIXIN_API_URL.split("/ilink/bot/", 1)[0]
+WEIXIN_CDN_BASE_URL = CFG["weixin_cdn_base_url"].rstrip("/")
+STICKER_DIR = CFG["sticker_dir"]
+STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 3))
+STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 1))
 PROXY = CFG["proxy"]
 CODEX_HOME = CFG["codex_home"]
 CODEX_WRAPPER = CFG["codex_wrapper"]
@@ -138,6 +147,8 @@ RECENT_FILE = os.path.join(MEMORY_DIR, "recent_replies.md")
 REMINDERS_INDEX = os.path.join(MEMORY_DIR, "reminders.json")
 CARE_PLAN_FILE = os.path.join(MEMORY_DIR, ".care_plan.json")
 CAPTURE_STATE_FILE = os.path.join(MEMORY_DIR, ".capture_state.json")
+STICKER_USAGE_FILE = os.path.join(MEMORY_DIR, "sticker_usage.json")
+THREADS_FILE = os.path.join(MEMORY_DIR, "THREADS.md")
 
 RECENT_HEADER = (
     "# 最近说过的话（避免重复）\n\n"
@@ -159,6 +170,41 @@ def redact(text):
     for pattern in SECRET_PATTERNS:
         text = pattern.sub("[REDACTED]", text)
     return text
+
+
+def load_json(path, default=None):
+    """Load JSON, returning default on any error."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def save_json_atomic(path, data):
+    """Write JSON via a temp file + os.replace so a crash cannot truncate it."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def session_peer(session):
+    """Return the peer user id from a weixin:dm:<peer> session key."""
+    if not session:
+        return ""
+    marker = "weixin:dm:"
+    return session.split(marker, 1)[1] if marker in session else session
+
+
+def read_context_token(path, peer):
+    """Read a peer's cached ilink context token; empty when absent/expired."""
+    data = load_json(path, {}) or {}
+    token = data.get(peer, "") if isinstance(data, dict) else ""
+    return token if isinstance(token, str) else ""
 
 
 def append_raw(sid, text, role="assistant", ts=None):

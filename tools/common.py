@@ -36,6 +36,9 @@ DEFAULTS = {
     "sticker_cooldown_seconds": 30,
     "proactive_daily_limit": 4,
     "proactive_min_gap_seconds": 300,
+    "edge_tts_python": "",
+    "edge_tts_voice": "zh-CN-XiaoxiaoNeural",
+    "voice_dir": os.path.join(ROOT, "artifacts", "voice"),
     "proxy": "",
     "codex_home": os.path.join(ROOT, ".codex"),
     "codex_wrapper": os.path.join(ROOT, "bin", "codex.exe"),
@@ -45,7 +48,7 @@ DEFAULTS = {
 
 PATH_KEYS = {
     "work_dir", "cc_data_dir", "cc_bin", "cc_config_file", "session_file",
-    "sticker_dir", "codex_home", "codex_wrapper",
+    "sticker_dir", "edge_tts_python", "voice_dir", "codex_home", "codex_wrapper",
 }
 
 
@@ -144,6 +147,9 @@ WEIXIN_API_URL = CFG["weixin_api_url"]
 WEIXIN_API_BASE = WEIXIN_API_URL.split("/ilink/bot/", 1)[0]
 WEIXIN_CDN_BASE_URL = CFG["weixin_cdn_base_url"].rstrip("/")
 STICKER_DIR = CFG["sticker_dir"]
+EDGE_TTS_PYTHON = CFG["edge_tts_python"]
+EDGE_TTS_VOICE = CFG["edge_tts_voice"]
+VOICE_DIR = CFG["voice_dir"]
 STICKER_DAILY_LIMIT = int(CFG.get("sticker_daily_limit", 12))
 STICKER_PROACTIVE_DAILY_LIMIT = int(CFG.get("sticker_proactive_daily_limit", 0))
 STICKER_COOLDOWN_SECONDS = int(CFG.get("sticker_cooldown_seconds", 30))

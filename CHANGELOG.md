@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.5 — 2026-11-01
+
+- Add `send_tts.py`: Edge TTS `zh-CN-XiaoxiaoNeural` voice, delivered as an
+  MP3 file because iLink rejects native voice items with `ret=-1`.
+- Add direct iLink file sending (`send_xi.py --file`) for the secondary bot.
+- Document the optional `.venv-voice` setup and voice safety budget.
+
 ## v0.2.4 — 2026-11-01
 
 - Run as close to the iLink limit as is safe: proactive messages share a

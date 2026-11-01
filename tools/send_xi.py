@@ -228,6 +228,80 @@ def send_image(path):
     )
 
 
+def send_file(path):
+    peer, context_token = _peer_and_context()
+    raw, key, filekey, ciphertext = _prepare_image(path)
+    upload_request = {
+        "filekey": filekey,
+        "media_type": 3,
+        "to_user_id": peer,
+        "rawsize": len(raw),
+        "rawfilemd5": hashlib.md5(raw).hexdigest(),
+        "filesize": len(ciphertext),
+        "no_need_thumb": True,
+        "aeskey": key.hex(),
+        "base_info": {"channel_version": "cc-connect-weixin/1.0"},
+    }
+    _, _, raw_resp = _post_json(
+        c.WEIXIN_API_BASE + "/ilink/bot/getuploadurl", upload_request, "getuploadurl"
+    )
+    upload = _parse_json(raw_resp)
+    upload_url = upload.get("upload_full_url") or ""
+    if not upload_url:
+        upload_param = upload.get("upload_param", "")
+        if not upload_param:
+            raise ILinkError("getuploadurl", "响应缺少 upload_full_url/upload_param")
+        upload_url = c.WEIXIN_CDN_BASE_URL + "/upload?" + urllib.parse.urlencode(
+            {"encrypted_query_param": upload_param, "filekey": filekey}
+        )
+
+    download_param = ""
+    for attempt in range(3):
+        request = urllib.request.Request(
+            upload_url,
+            data=ciphertext,
+            method="POST",
+            headers={"Content-Type": "application/octet-stream", "User-Agent": "cc-connect-weixin/1.0"},
+        )
+        try:
+            with _opener().open(request, timeout=60) as response:
+                headers = {k.lower(): v for k, v in response.headers.items()}
+                response.read()
+            download_param = headers.get("x-encrypted-param", "")
+            if not download_param:
+                raise ILinkError("cdn", "CDN 上传成功但缺少 x-encrypted-param")
+            break
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")[:200]
+            if 500 <= exc.code < 600 and attempt < 2:
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            raise ILinkError("cdn", f"CDN 上传失败：HTTP {exc.code}: {body}")
+        except ILinkError:
+            raise
+        except Exception as exc:
+            if attempt < 2:
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            raise ILinkError("cdn", f"CDN 上传失败：{type(exc).__name__}: {str(exc)[:200]}")
+
+    file_item = {
+        "media": {
+            "encrypt_query_param": download_param,
+            "aes_key": base64.b64encode(key.hex().encode()).decode(),
+            "encrypt_type": 1,
+        },
+        "file_name": os.path.basename(path),
+        "len": str(len(raw)),
+    }
+    return _send_items(
+        peer,
+        context_token,
+        [{"type": 4, "file_item": file_item}],
+        client_id="cc-" + os.urandom(8).hex(),
+    )
+
+
 def main():
     args = sys.argv[1:]
     if args and args[0] == "--image":
@@ -236,6 +310,17 @@ def main():
             return 1
         try:
             result = send_image(args[1])
+        except ILinkError as exc:
+            print(f"发送失败[{exc.stage}]：{exc.message}")
+            return exc.exit_code()
+        print("已发送" if result.get("ok") else "发送失败")
+        return 0 if result.get("ok") else 1
+    if args and args[0] == "--file":
+        if len(args) < 2:
+            print("用法: python -X utf8 send_xi.py --file <path>")
+            return 1
+        try:
+            result = send_file(args[1])
         except ILinkError as exc:
             print(f"发送失败[{exc.stage}]：{exc.message}")
             return exc.exit_code()

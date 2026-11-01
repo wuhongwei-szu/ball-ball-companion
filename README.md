@@ -48,6 +48,7 @@ work_dir/
     ├── common.py              # 配置加载与会话/token 运行时推导
     ├── chat_burst.py          # 统一的多气泡 + 表情发送入口
     ├── send_sticker.py        # 选图/额度/冷却 + 发送一张表情
+    ├── send_tts.py            # Edge TTS 生成晓晓语音 MP3 并以文件发送
     ├── sticker_admin.py       # 表情库 scan/validate/list/catalog/import
     ├── memory_search.py       # 本地记忆关键词检索
     ├── send_msg.py            # 单条发送 + 写原文
@@ -64,7 +65,7 @@ work_dir/
 
 - Windows 10/11（部署脚本以 PowerShell 为主）
 - Python 3.11+
-- Python 包：`cryptography`（第二个 bot 发图必需）；`Pillow`（表情库缩图可选）
+- Python 包：`cryptography`（第二个 bot 发图必需）；`Pillow`（表情库缩图可选）；`edge-tts`（可选语音，建议用 Python 3.12 独立 venv）
 - cc-connect **1.5.x**（示例使用 1.5.0）
 - Codex CLI（桌面版自带或 `npm install -g @openai/codex`）
 - 两个微信 ilink bot（cc-connect 的 `weixin` 平台）
@@ -163,6 +164,24 @@ python -X utf8 tools/sticker_admin.py list
 
 用 `import` 导入自己的图库；用 `catalog` 生成分类说明。扫描会跳过小于 240px 或小于 20KB 的图，避免发出糊图。
 `send_xi.py --image` 直连第二个 bot 的 iLink 媒体上传，避免 cc-connect 多 bot 路由到错误的账号。
+
+### 语音（晓晓）
+
+原生语音气泡会被 iLink 拒绝（`ret=-1`），所以语音以 **MP3 文件**发送。准备一个独立的 Python 3.12 环境：
+
+```bash
+uv venv .venv-voice --python 3.12
+uv pip install --python .venv-voice\Scripts\python.exe edge-tts
+```
+
+在 `bot.config.json` 配置 `edge_tts_python`、`edge_tts_voice`（默认 `zh-CN-XiaoxiaoNeural`）和 `voice_dir`，然后：
+
+```bash
+python -X utf8 tools/send_tts.py master "主人，晚安，做个好梦～"
+python -X utf8 tools/send_tts.py xi "小主人，球球在呢～" --proactive
+```
+
+主动语音加 `--proactive`，占主动消息安全预算；用户明确要求的回复不加。Edge TTS 失败时降级文字，不要改用难听的备用音色。
 
 ### 事件提醒
 

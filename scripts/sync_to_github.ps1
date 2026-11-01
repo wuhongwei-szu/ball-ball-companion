@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $toolsDst | Out-Null
 
 $names = @(
     "common.py", "send_msg.py", "send_xi.py", "send_sticker.py",
-    "chat_burst.py", "sticker_admin.py", "memory_search.py",
+    "send_tts.py", "chat_burst.py", "sticker_admin.py", "memory_search.py",
     "add_reminder.py", "care_scheduler.py", "capture_transcripts.py",
     "healthcheck.py", "backup.ps1", "setup_tasks.ps1"
 )

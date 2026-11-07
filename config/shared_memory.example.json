@@ -1,1 +1,17 @@
-{"version":1,"project":"my-project","subjects":{"master":{"account":"<owner-bot-account-id>","session_key":"weixin:dm:<owner-peer>","user_id":"<owner-peer>"},"xi":{"account":"<partner-bot-account-id>","session_key":"weixin:dm:<partner-peer>","user_id":"<partner-peer>"}}}
+{
+  "version": 1,
+  "project": "my-project",
+  "subjects": {
+    "master": {
+      "account": "<owner-bot-account-id>",
+      "session_key": "weixin:dm:<owner-peer>",
+      "user_id": "<owner-peer>"
+    },
+    "xi": {
+      "account": "<partner-bot-account-id>",
+      "session_key": "weixin:dm:<partner-peer>",
+      "user_id": "<partner-peer>"
+    }
+  },
+  "python": "C:\\Python311\\python.exe"
+}

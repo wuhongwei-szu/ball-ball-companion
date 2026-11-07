@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -128,16 +129,24 @@ BOT_NAME = CFG.get("bot_name", "Companion")
 MASTER_SESSION = _derive_session_key(SESSION_FILE, CFG.get("master_session_id", "s1"))
 XI_SESSION = _derive_session_key(SESSION_FILE, CFG.get("xi_session_id", "s2"))
 
+def _bound_weixin_accounts(platforms, cfg):
+    """Resolve role bindings by configured public account ID, never list order."""
+    if not platforms:
+        return ("", ""), ("", "")
+    bindings = []
+    for role in ("master", "xi"):
+        account = cfg.get(role + "_account_id", "").strip()
+        matches = [pair for pair in platforms if pair[0] == account and account]
+        if len(matches) != 1:
+            raise ValueError("missing or ambiguous stable account binding for " + role)
+        bindings.append(matches[0])
+    if bindings[0][0] == bindings[1][0]:
+        raise ValueError("two roles require distinct stable account bindings")
+    return tuple(bindings)
+
+
 _weixin_platforms = _parse_weixin_platforms(CC_CONFIG_FILE)
-_xi_index = int(CFG.get("xi_platform_index", 2))
-if not (1 <= _xi_index <= len(_weixin_platforms)):
-    _xi_index = 1
-if _weixin_platforms:
-    MASTER_BOT_ACCOUNT, MASTER_BOT_TOKEN = _weixin_platforms[0]
-    XI_BOT_ACCOUNT, XI_BOT_TOKEN = _weixin_platforms[_xi_index - 1]
-else:
-    MASTER_BOT_ACCOUNT, MASTER_BOT_TOKEN = "", ""
-    XI_BOT_ACCOUNT, XI_BOT_TOKEN = "", ""
+(MASTER_BOT_ACCOUNT, MASTER_BOT_TOKEN), (XI_BOT_ACCOUNT, XI_BOT_TOKEN) = _bound_weixin_accounts(_weixin_platforms, CFG)
 MASTER_CONTEXT_TOKENS = (
     os.path.join(DATA_DIR, "weixin", PROJECT, MASTER_BOT_ACCOUNT, "context_tokens.json")
     if MASTER_BOT_ACCOUNT else ""
@@ -230,6 +239,42 @@ def read_context_token(path, peer):
     data = load_json(path, {}) or {}
     token = data.get(peer, "") if isinstance(data, dict) else ""
     return token if isinstance(token, str) else ""
+
+
+CURRENT_SESSION_KEY = os.environ.get("CC_SESSION_KEY", "").strip()
+
+
+def current_target():
+    """Return 'master'/'xi' when the agent env identifies the active session."""
+    account = os.environ.get("CC_PLATFORM_ACCOUNT", "").strip()
+    if account:
+        matches = [role for role in ("master", "xi") if CFG.get(role + "_account_id") == account]
+        return matches[0] if len(matches) == 1 else ""
+    key = CURRENT_SESSION_KEY
+    if not key:
+        return ""
+    matches = [role for role, session in (("master", MASTER_SESSION), ("xi", XI_SESSION))
+               if session and (key == session or key.endswith(":" + session))]
+    return matches[0] if len(matches) == 1 else ""
+
+
+def assert_target(target, relay=False):
+    """Block accidental cross-bot sends. Explicit relays pass relay=True."""
+    current = current_target()
+    if not current or target == current or relay:
+        return
+    raise SystemExit(
+        f"当前会话属于 {current}，不能把消息发给 {target}；"
+        "跨 bot 转发需要显式 --relay"
+    )
+
+
+def context_token_fresh(path, max_minutes=30):
+    """True when a bot's context-token file was refreshed recently."""
+    try:
+        return time.time() - os.path.getmtime(path) <= max_minutes * 60
+    except Exception:
+        return False
 
 
 def _local_now():
@@ -339,10 +384,42 @@ def require(value, name):
         raise SystemExit(f"缺少配置项 {name}，请检查 config/bot.config.json 和 cc-connect 配置。")
 
 
+def _cc_account_args(args):
+    """Bind sends/new timers before invoking any process; never infer by index."""
+    args = list(args)
+    if not args or args[0] not in {"send", "timer"}:
+        return args
+    if args[0] == "timer" and (len(args) < 2 or args[1] != "add"):
+        return args
+    if "--account" in args:
+        return args
+    targets = []
+    for index, arg in enumerate(args):
+        if arg in {"--session", "--session-key", "-s"}:
+            if index + 1 >= len(args):
+                raise ValueError("session argument requires a value; no process started")
+            targets.append(args[index + 1])
+    if len(set(targets)) > 1:
+        raise ValueError("conflicting recipient sessions; no process started")
+    target = targets[0] if targets else os.environ.get("CC_SESSION_KEY", "").strip()
+    if target and target == os.environ.get("CC_SESSION_KEY", "").strip():
+        account = os.environ.get("CC_PLATFORM_ACCOUNT", "").strip()
+        if account:
+            return args + ["--account", account]
+    owners = []
+    for session, field in ((MASTER_SESSION, "master_account_id"), (XI_SESSION, "xi_account_id")):
+        if session and target == session:
+            owners.append(CFG.get(field, "").strip())
+    configured = [account for account, _ in _weixin_platforms]
+    if len(owners) != 1 or not owners[0] or configured.count(owners[0]) != 1:
+        raise ValueError("recipient requires a unique stable account binding; no process started")
+    return args + ["--account", owners[0]]
+
+
 def run_cc(args, timeout=30):
     """Run the cc-connect CLI with --data-dir appended."""
     require(CC_BIN, "cc_bin")
-    cmd = [CC_BIN] + list(args) + ["--data-dir", DATA_DIR]
+    cmd = [CC_BIN] + _cc_account_args(args) + ["--data-dir", DATA_DIR]
     return subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=timeout,

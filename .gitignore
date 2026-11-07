@@ -37,3 +37,8 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Private stable memory bindings
+config/shared_memory.json
+*.sqlite3
+*.sqlite3-*

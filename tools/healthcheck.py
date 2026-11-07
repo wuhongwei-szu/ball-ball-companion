@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+import capture_runtime
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -34,6 +35,18 @@ def ps(command):
 def latest(paths):
     files = [p for p in paths if os.path.isfile(p)]
     return max(files, key=os.path.getmtime) if files else None
+
+
+def report_capture_health(jobs):
+    job = next((j for j in jobs if isinstance(j, dict) and j.get("id") == "capture01"), None)
+    health = capture_runtime.capture_health(c.CAPTURE_STATE_FILE + ".v2", job)
+    healthy = health["capture_status"] == "ok"
+    print(f"[{'OK' if healthy else '!!'}] archive capture: {health['capture_status']}"
+          + (f" reason={health['reason']}" if health["reason"] else ""))
+    print(f"[{'WARN' if health['coverage_status'] != 'no_recorded_gaps' else 'OK'}] "
+          f"archive coverage: {health['coverage_status']} "
+          f"review_pending={health['review_pending']} review_boundaries={health['review_boundaries']}")
+    return healthy
 
 
 def main():
@@ -71,6 +84,8 @@ def main():
     enabled = sum(1 for j in jobs if j.get("enabled"))
     print(f"[{'OK' if enabled > 0 else '!!'}] 定时任务: {enabled} 启用 / {len(jobs)} 总数")
     if enabled <= 0:
+        ok = False
+    if not report_capture_health(jobs):
         ok = False
 
     for name in ("MEMORY.md", "STATE.md", "EVENTS.md"):

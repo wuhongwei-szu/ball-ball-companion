@@ -29,5 +29,7 @@
   "labels": {
     "master": "Owner",
     "xi": "Partner"
-  }
+  },
+  "master_account_id": "<owner-bot-account-id>",
+  "xi_account_id": "<partner-bot-account-id>"
 }

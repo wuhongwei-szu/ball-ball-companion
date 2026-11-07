@@ -39,6 +39,10 @@ Copy-Safe (Join-Path $BotRoot "AGENTS.md") $botDir
 Copy-Safe (Join-Path $BotRoot "memory") $botDir
 Copy-Safe (Join-Path $BotRoot "tools") $botDir
 Copy-Safe (Join-Path $BotRoot "assets") $botDir
+$binDir = Join-Path $botDir "bin"
+New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+Copy-Safe (Join-Path $BotRoot "bin\cc-connect.exe") $binDir
+Copy-Safe (Join-Path $BotRoot "bin\cc-connect-patched.exe") $binDir
 Copy-Safe (Join-Path $BotRoot "config\bot.config.json") $botDir
 
 # Isolated Codex config (auth.json intentionally excluded)

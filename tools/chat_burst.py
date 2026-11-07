@@ -2,10 +2,10 @@
 """Send a short burst of chat bubbles, optionally followed by one sticker.
 
 This is the single agent-facing send entry for casual replies. It provides:
-- any number of bubbles the agent passes (a sticker counts as one message);
+- at most six ordinary bubbles, or two proactive bubbles including a sticker;
 - natural random spacing, with total sleep capped at 5 seconds;
-- at most one sticker per call by default, no daily quota or cooldown unless
-  configured in bot.config.json (0 = unlimited). iLink may still throttle.
+- one context-selected sticker with no second probability roll by default;
+- configured sticker quota/cooldown and proactive budget still apply.
 
 Usage:
     python -X utf8 chat_burst.py master --sticker happy "第一句" "第二句"
@@ -27,6 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 MAX_TOTAL_SLEEP = 5.0
 MAX_BURST_MESSAGES = 6
+MAX_PROACTIVE_BURST_MESSAGES = 2
 
 
 def _delays(count, min_delay, max_delay, first_delay):
@@ -57,17 +58,18 @@ def main():
     parser = argparse.ArgumentParser(description="发短消息 + 可选 1 张表情")
     parser.add_argument("target", choices=["master", "xi"])
     parser.add_argument("messages", nargs="+", help="每条气泡一句话")
-    parser.add_argument("--sticker", help="表情分类；脚本按概率决定发不发")
+    parser.add_argument("--sticker", help="合适的表情分类；默认发送，不再重复抽概率")
     parser.add_argument("--sticker-prefer", help="按标签/文字偏好筛选，如 贴贴,抱,合十,击掌")
-    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
+    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "learned", "generic", "text", "silly"])
     parser.add_argument("--proactive", action="store_true", help="标记为主动消息，受本地主动安全预算约束")
-    parser.add_argument("--probability", type=float, default=0.5, help="发表情的概率（0-1，默认 0.5）")
+    parser.add_argument("--probability", type=float, default=1.0, help="显式选择额外随机筛选（0-1，默认 1，不再二次抽选）")
     parser.add_argument("--min-delay", type=float, default=0.7)
     parser.add_argument("--max-delay", type=float, default=1.8)
     parser.add_argument("--first-delay", type=float, default=None)
     parser.add_argument("--force-sticker", action="store_true", help="测试用：跳过表情冷却")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    c.assert_target(args.target)
 
     messages = [m.strip() for m in args.messages if m.strip()]
     if not messages:
@@ -79,10 +81,17 @@ def main():
     if args.sticker and not send_sticker_flag:
         print(f"[sticker] 概率未命中（p={probability:.2f}），这次只发文字")
 
+    if args.proactive and send_sticker_flag and len(messages) > 1:
+        # An optional picture must not displace a second text bubble that may
+        # contain an important reminder detail. One text + one picture is fine.
+        send_sticker_flag = False
+        print("[chat] 主动内容优先保留文字，本次不附可选表情")
+
     # Local burst cap: generous, but not an unbounded wall of bubbles.
-    allowed = MAX_BURST_MESSAGES - (1 if send_sticker_flag else 0)
+    burst_limit = MAX_PROACTIVE_BURST_MESSAGES if args.proactive else MAX_BURST_MESSAGES
+    allowed = burst_limit - (1 if send_sticker_flag else 0)
     if len(messages) > allowed:
-        print(f"[chat] 每轮本地安全上限 {MAX_BURST_MESSAGES} 条（表情算一条），已截断文字")
+        print(f"[chat] 每轮本地安全上限 {burst_limit} 条（表情算一条），已截断文字")
         messages = messages[:max(0, allowed)]
 
     # Proactive messages are the ones iLink throttles most; keep a safety
@@ -94,12 +103,13 @@ def main():
             return 3
         planned = len(messages) + (1 if send_sticker_flag else 0)
         if planned > remaining:
-            text_budget = remaining - (1 if send_sticker_flag else 0)
-            if text_budget <= 0:
-                messages = []
-                send_sticker_flag = bool(args.sticker)
+            # Preserve the reason for reaching out before an optional picture.
+            # With only one budget slot, a sticker must not swallow the text.
+            if remaining == 1:
+                send_sticker_flag = False
+                messages = messages[:1]
             else:
-                messages = messages[:text_budget]
+                messages = messages[:remaining - (1 if send_sticker_flag else 0)]
             print(f"[budget] 主动消息本地剩余 {remaining} 条，已压缩本次发送")
         if not messages and not send_sticker_flag:
             print("[budget] 本次没有可发内容")

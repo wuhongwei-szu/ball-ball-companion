@@ -2,7 +2,8 @@
 """Send one local sticker image to a WeChat bot.
 
 This is the low-level/admin entry. The chat agent should normally use
-chat_burst.py, which enforces the 1/3 probability, cooldown, and daily cap.
+chat_burst.py, which applies the probability once (default 1.0 for a selected sticker). This module
+enforces the configured cooldown and daily cap without another probability gate.
 
 Usage:
     python -X utf8 send_sticker.py master --category happy [--style cat]
@@ -14,6 +15,7 @@ import datetime
 import os
 import random
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,8 +36,8 @@ COOLDOWN_SECONDS = c.STICKER_COOLDOWN_SECONDS
 RECENT_DAYS = 3
 MIN_DIM = 240
 DEFAULT_STYLES = {
-    "master": ("cat", "pig", "silly", "anime", "generic", "seio"),
-    "xi": ("cat", "silly", "anime", "seio", "generic", "text"),
+    "master": ("cat", "pig", "silly", "anime", "learned", "generic", "seio"),
+    "xi": ("cat", "silly", "anime", "learned", "seio", "generic", "text"),
 }
 
 
@@ -160,6 +162,15 @@ def _select_candidate(manifest, category, style, sticker_id, state, target, pref
     clear = [e for e in pool if min(int(e.get("width", 0)), int(e.get("height", 0))) >= MIN_DIM]
     if clear:
         pool = clear
+    feedback = c.load_json(os.path.join(c.STICKER_DIR, "feedback.json"), {})
+    if isinstance(feedback, dict):
+        banned = {
+            sid for sid, fb in feedback.items()
+            if isinstance(fb, dict) and fb.get("banned")
+        }
+        pool = [e for e in pool if e.get("id") not in banned]
+        if not pool:
+            return None
     recent = _recent_ids(state.get("sent", []))
     fresh = [e for e in pool if e.get("id") not in recent]
     pool = fresh or pool
@@ -196,6 +207,22 @@ def _send_xi(path):
     if send_xi is None:
         print("表情发送失败：缺少 send_xi 模块")
         return 1
+    # Choose one transport. A failed/unknown cc-connect result may still mean
+    # delivery, so do not fall through to a second send through direct iLink.
+    if c.current_target() == "xi" and c.XI_SESSION:
+        try:
+            first = c.run_cc([
+                "send", "-p", c.PROJECT, "--session", c.XI_SESSION,
+                "--image", path,
+            ], timeout=60)
+        except (subprocess.TimeoutExpired, OSError):
+            print("表情发送结果未确认（cc-connect 调用异常）；不会切换通道补发，请先核实送达。")
+            return 1
+        if first.returncode == 0:
+            print((first.stdout or "").strip() or "已发送")
+            return 0
+        print("表情发送结果未确认（cc-connect 返回非零状态）；不会切换通道补发，请先核实送达。")
+        return 1
     try:
         send_xi.send_image(path)
     except ILinkError as exc:
@@ -229,6 +256,7 @@ def send_one(target, category=None, style=None, sticker_id=None,
     if target not in {"master", "xi"}:
         print("需要目标 master 或 xi")
         return 1
+    c.assert_target(target)
     if proactive and not skip_budget:
         remaining, reason = c.proactive_remaining(target)
         if remaining <= 0:
@@ -252,6 +280,9 @@ def send_one(target, category=None, style=None, sticker_id=None,
             return 3
 
     entry = _select_candidate(manifest, category, style, sticker_id, state, target, prefer)
+    if entry is None:
+        print("这个分类没有可用表情（可能都被标记为不喜欢）")
+        return 3
     path = os.path.join(c.STICKER_DIR, entry["file"])
     if not os.path.isfile(path):
         print(f"表情文件缺失：{entry['file']}")
@@ -271,7 +302,7 @@ def main():
     parser = argparse.ArgumentParser(description="发送一张本地表情包")
     parser.add_argument("target", nargs="?", choices=["master", "xi"])
     parser.add_argument("--category")
-    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "generic", "text", "silly"])
+    parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "learned", "generic", "text", "silly"])
     parser.add_argument("--id", dest="sticker_id")
     parser.add_argument("--prefer", help="按标签/文字偏好筛选，如 贴贴,抱,合十,击掌")
     parser.add_argument("--proactive", action="store_true")

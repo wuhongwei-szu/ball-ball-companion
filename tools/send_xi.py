@@ -10,6 +10,7 @@ Usage:
 """
 import base64
 import hashlib
+import http.client
 import json
 import os
 import random
@@ -29,23 +30,38 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_API_RESPONSE_BYTES = 64 * 1024
 
 
 class ILinkError(Exception):
-    def __init__(self, stage, message, ret=None, errmsg=""):
+    def __init__(self, stage, message, ret=None, errmsg="", *, errcode=None,
+                 http_status=None, outcome="not_sent", response_kind=None):
         super().__init__(message)
         self.stage = stage
         self.message = message
         self.ret = ret
         self.errmsg = errmsg
+        self.errcode = errcode
+        self.http_status = http_status
+        self.outcome = outcome
+        self.response_kind = response_kind
 
     def exit_code(self):
         return 2 if self.stage in {"context", "config"} else 1
 
 
-def _opener():
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # A redirected POST is not an acknowledgment from the send endpoint.
+        return None
+
+
+def _opener(*, allow_redirects=True):
     # iLink and the WeChat CDN should be reached directly, not through Clash.
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    handlers = [urllib.request.ProxyHandler({})]
+    if not allow_redirects:
+        handlers.append(_NoRedirect())
+    return urllib.request.build_opener(*handlers)
 
 
 def _headers():
@@ -76,17 +92,141 @@ def _peer_and_context():
     return peer, context_token
 
 
+def _response_fields(raw):
+    """Only return allowlisted diagnostics; never retain a raw body or errmsg."""
+    if len(raw) > MAX_API_RESPONSE_BYTES:
+        return None, None, "oversized", False
+    if not raw.strip():
+        return None, None, "empty", False
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            # Go encoding/json matches these struct fields case-insensitively.
+            if key.casefold() in {"ret", "errcode", "errmsg"}:
+                key = key.casefold()
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("non-JSON constant")
+
+    try:
+        result = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
+                            parse_constant=invalid_constant)
+    except (ValueError, UnicodeError, RecursionError):
+        return None, None, "invalid_json", False
+    if not isinstance(result, dict):
+        return None, None, "non_object", False
+    codes = []
+    valid = True
+    for key in ("ret", "errcode"):
+        value = result.get(key)
+        if key in result and (type(value) is not int or not -(2**63) <= value < 2**63):
+            valid = False
+            value = "[invalid]"
+        codes.append(value)
+    kind = "object" if valid else "invalid_codes"
+    if valid and result.get("errmsg") is not None and not isinstance(result["errmsg"], str):
+        kind = "invalid_errmsg"
+    return *codes, kind, bool(result.get("errmsg"))
+
+
+def _api_error(stage, status, raw=b"", *, reason=None):
+    ret, errcode, kind, has_errmsg = _response_fields(raw)
+    # Non-200/transport failures do not prove the POST was never processed.
+    rejected = status == 200 and kind == "object" and any(
+        code is not None and code != 0 for code in (ret, errcode)
+    )
+    outcome = "rejected" if rejected else "uncertain"
+    fields = (f"http_status={status if status is not None else 'unknown'} "
+              f"ret={ret if ret is not None else 'absent'} "
+              f"errcode={errcode if errcode is not None else 'absent'} "
+              f"response={kind} errmsg={'[omitted]' if has_errmsg else 'absent'} "
+              f"outcome={outcome}")
+    if reason:
+        fields += " transport=" + reason
+    message = ("上游返回错误（不代表未送达）。" if rejected else "发送结果未确认。") + fields + "；请勿自动重发。"
+    return ILinkError(stage, message, ret=ret, errmsg="[omitted]" if has_errmsg else "",
+                      errcode=errcode, http_status=status, outcome=outcome,
+                      response_kind=kind)
+
+
+def _read_api_response(response):
+    raw = response.read(MAX_API_RESPONSE_BYTES + 1)
+    # read(size) can silently return a truncated but parseable HTTP body,
+    # whereas unbounded HTTPResponse.read() raises IncompleteRead. Keep the
+    # size limit without losing the Content-Length completeness check.
+    length = response.headers.get("Content-Length")
+    if length is not None:
+        length = length.strip()
+        if not length or not length.isascii() or not length.isdecimal():
+            raise ValueError("invalid Content-Length")
+        expected = int(length)
+        if len(raw) < min(expected, MAX_API_RESPONSE_BYTES + 1):
+            raise http.client.IncompleteRead(b"", expected - len(raw))
+    return raw
+
+
+def _close_failed_response(response):
+    # Cleanup of an already failed response must not replace its sanitized
+    # error, leak a URL/token, or change whether another attempt is made.
+    try:
+        response.close()
+    except Exception:
+        pass
+
+
 def _post_json(url, body, stage):
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method="POST", headers=_headers())
+    status = None
     try:
-        with _opener().open(request, timeout=30) as response:
-            return response.status, response.headers, response.read()
+        request = urllib.request.Request(url, data=data, method="POST", headers=_headers())
+        with _opener(allow_redirects=False).open(request, timeout=30) as response:
+            status = response.status
+            headers = response.headers
+            raw = _read_api_response(response)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:300]
-        raise ILinkError(stage, f"HTTP {exc.code}: {detail}")
+        status = exc.code
+        try:
+            raw = _read_api_response(exc)
+        except Exception as read_error:
+            raise _api_error(stage, status, reason=type(read_error).__name__) from None
+        finally:
+            _close_failed_response(exc)
+        raise _api_error(stage, status, raw) from None
     except Exception as exc:
-        raise ILinkError(stage, f"{type(exc).__name__}: {str(exc)[:200]}")
+        # Exception text may contain request URLs, credentials or user data.
+        raise _api_error(stage, status, reason=type(exc).__name__) from None
+    if status != 200 or len(raw) > MAX_API_RESPONSE_BYTES:
+        raise _api_error(stage, status, raw)
+    return status, headers, raw
+
+
+def _send_response(status, raw):
+    ret, errcode, kind, _ = _response_fields(raw)
+    if (status != 200 or kind not in {"empty", "object"}
+            or any(code is not None and code != 0 for code in (ret, errcode))):
+        raise _api_error("sendmessage", status, raw)
+    # Match cc-connect v1.5.0: HTTP 200 empty body / omitted zero-valued codes
+    # are successful API acknowledgments. Do not fabricate ret=0 for an absent
+    # field, or claim that an API acknowledgment proves recipient delivery.
+    return {"ok": True, "ret": ret, "errcode": errcode, "errmsg": "",
+            "http_status": status, "outcome": "accepted", "response_kind": kind,
+            "acceptance_basis": "explicit_zero" if ret == 0 or errcode == 0 else "http_200_compatibility"}
+
+
+def _success_message(result):
+    if result.get("transport") == "cc-connect":
+        return "cc-connect 报告发送成功（未确认收件人送达）：basis=cc_exit_zero"
+    ret, errcode = result.get("ret"), result.get("errcode")
+    return ("上游已接受（未确认收件人送达）："
+            f"http_status={result.get('http_status')} "
+            f"ret={ret if ret is not None else 'absent'} "
+            f"errcode={errcode if errcode is not None else 'absent'} "
+            f"response={result.get('response_kind')} basis={result.get('acceptance_basis')}")
 
 
 def _parse_json(raw):
@@ -101,6 +241,7 @@ def _parse_json(raw):
 def _send_items(peer, context_token, item_list, client_id=None):
     body = {
         "msg": {
+            "from_user_id": "",
             "to_user_id": peer,
             "client_id": client_id or ("cc-" + os.urandom(6).hex()),
             "message_type": 2,
@@ -110,22 +251,8 @@ def _send_items(peer, context_token, item_list, client_id=None):
         },
         "base_info": {"channel_version": "cc-connect-weixin/1.0"},
     }
-    _, _, raw = _post_json(c.WEIXIN_API_URL, body, "sendmessage")
-    result = _parse_json(raw)
-    if not result:
-        return {"ok": True, "ret": 0, "errmsg": ""}
-    ret = result.get("ret", -1)
-    if ret == 0:
-        return {"ok": True, "ret": 0, "errmsg": result.get("errmsg", "")}
-    errmsg = result.get("errmsg", "")
-    if ret == -2:
-        raise ILinkError(
-            "sendmessage",
-            "上游返回 ret=-2（可能是会话过期或发送节流）。不要重试；先让对方发消息或稍后再试。",
-            ret=ret,
-            errmsg=errmsg,
-        )
-    raise ILinkError("sendmessage", f"发送失败：ret={ret} errmsg={errmsg}", ret=ret, errmsg=errmsg)
+    status, _, raw = _post_json(c.WEIXIN_API_URL, body, "sendmessage")
+    return _send_response(status, raw)
 
 
 def send_text(message):
@@ -150,7 +277,19 @@ def _prepare_image(path):
     return raw, key, filekey, ciphertext
 
 
-def send_image(path):
+def _cdn_request(upload_url, ciphertext):
+    try:
+        return urllib.request.Request(
+            upload_url, data=ciphertext, method="POST",
+            headers={"Content-Type": "application/octet-stream", "User-Agent": "cc-connect-weixin/1.0"},
+        )
+    except Exception as exc:
+        # Request construction can echo an invalid URL containing upload tokens.
+        raise ILinkError("cdn", "CDN 请求无法创建：" + type(exc).__name__,
+                         outcome="not_sent") from None
+
+
+def _send_image_direct(path):
     peer, context_token = _peer_and_context()
     raw, key, filekey, ciphertext = _prepare_image(path)
     upload_request = {
@@ -180,12 +319,7 @@ def send_image(path):
     # CDN upload: encrypted body, no auth headers; 5xx may be retried, 4xx is final.
     last_error = None
     for attempt in range(3):
-        request = urllib.request.Request(
-            upload_url,
-            data=ciphertext,
-            method="POST",
-            headers={"Content-Type": "application/octet-stream", "User-Agent": "cc-connect-weixin/1.0"},
-        )
+        request = _cdn_request(upload_url, ciphertext)
         try:
             with _opener().open(request, timeout=60) as response:
                 headers = {k.lower(): v for k, v in response.headers.items()}
@@ -195,22 +329,22 @@ def send_image(path):
                 raise ILinkError("cdn", "CDN 上传成功但缺少 x-encrypted-param")
             break
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:200]
-            last_error = f"HTTP {exc.code}: {body}"
+            last_error = f"HTTP {exc.code}"
+            _close_failed_response(exc)
             if 500 <= exc.code < 600 and attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise ILinkError("cdn", f"CDN 上传失败：{last_error}")
+            raise ILinkError("cdn", f"CDN 上传失败：{last_error}") from None
         except ILinkError:
             raise
         except Exception as exc:
-            last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            last_error = type(exc).__name__
             if attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise ILinkError("cdn", f"CDN 上传失败：{last_error}")
+            raise ILinkError("cdn", f"CDN 上传失败：{last_error}") from None
     else:
-        raise ILinkError("cdn", f"CDN 上传失败：{last_error}")
+        raise ILinkError("cdn", f"CDN 上传失败：{last_error}") from None
 
     image_item = {
         "media": {
@@ -228,7 +362,7 @@ def send_image(path):
     )
 
 
-def send_file(path):
+def _send_file_direct(path):
     peer, context_token = _peer_and_context()
     raw, key, filekey, ciphertext = _prepare_image(path)
     upload_request = {
@@ -257,12 +391,7 @@ def send_file(path):
 
     download_param = ""
     for attempt in range(3):
-        request = urllib.request.Request(
-            upload_url,
-            data=ciphertext,
-            method="POST",
-            headers={"Content-Type": "application/octet-stream", "User-Agent": "cc-connect-weixin/1.0"},
-        )
+        request = _cdn_request(upload_url, ciphertext)
         try:
             with _opener().open(request, timeout=60) as response:
                 headers = {k.lower(): v for k, v in response.headers.items()}
@@ -272,18 +401,18 @@ def send_file(path):
                 raise ILinkError("cdn", "CDN 上传成功但缺少 x-encrypted-param")
             break
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:200]
+            _close_failed_response(exc)
             if 500 <= exc.code < 600 and attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise ILinkError("cdn", f"CDN 上传失败：HTTP {exc.code}: {body}")
+            raise ILinkError("cdn", f"CDN 上传失败：HTTP {exc.code}") from None
         except ILinkError:
             raise
         except Exception as exc:
             if attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise ILinkError("cdn", f"CDN 上传失败：{type(exc).__name__}: {str(exc)[:200]}")
+            raise ILinkError("cdn", f"CDN 上传失败：{type(exc).__name__}") from None
 
     file_item = {
         "media": {
@@ -302,6 +431,57 @@ def send_file(path):
     )
 
 
+def _send_media_via_cc(path, flag):
+    """Dispatch once via the already-selected active xi session; never fall back."""
+    if not getattr(c, "CC_BIN", ""):
+        raise ILinkError("config", "缺少 cc_bin；未发送，未切换到其他通道。", outcome="not_sent")
+    try:
+        result = c.run_cc([
+            "send", "-p", c.PROJECT, "--session", c.XI_SESSION, flag, path,
+        ], timeout=120)
+        code = result.returncode
+    except (Exception, SystemExit) as exc:
+        # A timeout/read failure may happen after cc-connect sent the message.
+        # Never expose stdout/stderr, command arguments or exception text.
+        raise ILinkError(
+            "cc_send", "cc-connect 发送结果未确认：transport=" + type(exc).__name__
+            + "；请勿自动重发或改用其他通道。", outcome="uncertain",
+            response_kind="process_error",
+        ) from None
+    if type(code) is not int or code != 0:
+        safe_code = str(code) if type(code) is int and -(2**63) <= code < 2**63 else "[invalid]"
+        raise ILinkError(
+            "cc_send", "cc-connect 发送结果未确认：exit_code=" + safe_code
+            + "；请勿自动重发或改用其他通道。", outcome="uncertain",
+            response_kind="process_exit",
+        )
+    return {"ok": True, "ret": None, "errcode": None, "errmsg": "",
+            "http_status": None, "outcome": "accepted", "response_kind": "process_exit",
+            "acceptance_basis": "cc_exit_zero", "transport": "cc-connect"}
+
+
+def _send_media(path, flag, direct_send):
+    # Select exactly one route BEFORE a send attempt. An unavailable context
+    # indicator means standalone explicit-XI direct mode, as in the repo base.
+    target_probe = getattr(c, "current_target", None)
+    try:
+        use_cc = target_probe is not None and target_probe() == "xi" and bool(c.XI_SESSION)
+    except (Exception, SystemExit) as exc:
+        raise ILinkError("config", "无法确定媒体发送通道：" + type(exc).__name__,
+                         outcome="not_sent", response_kind="route_error") from None
+    if use_cc:
+        return _send_media_via_cc(path, flag)
+    return direct_send(path)
+
+
+def send_image(path):
+    return _send_media(path, "--image", _send_image_direct)
+
+
+def send_file(path):
+    return _send_media(path, "--file", _send_file_direct)
+
+
 def main():
     args = sys.argv[1:]
     if args and args[0] == "--image":
@@ -311,9 +491,9 @@ def main():
         try:
             result = send_image(args[1])
         except ILinkError as exc:
-            print(f"发送失败[{exc.stage}]：{exc.message}")
+            print(f"发送未完成[{exc.stage}]：{exc.message}")
             return exc.exit_code()
-        print("已发送" if result.get("ok") else "发送失败")
+        print(_success_message(result) if result.get("ok") else "发送未完成")
         return 0 if result.get("ok") else 1
     if args and args[0] == "--file":
         if len(args) < 2:
@@ -322,9 +502,9 @@ def main():
         try:
             result = send_file(args[1])
         except ILinkError as exc:
-            print(f"发送失败[{exc.stage}]：{exc.message}")
+            print(f"发送未完成[{exc.stage}]：{exc.message}")
             return exc.exit_code()
-        print("已发送" if result.get("ok") else "发送失败")
+        print(_success_message(result) if result.get("ok") else "发送未完成")
         return 0 if result.get("ok") else 1
 
     message = " ".join(args) if args else sys.stdin.read()
@@ -335,9 +515,9 @@ def main():
     try:
         result = send_text(message)
     except ILinkError as exc:
-        print(f"发送失败[{exc.stage}]：{exc.message}")
+        print(f"发送未完成[{exc.stage}]：{exc.message}")
         return exc.exit_code()
-    print("已发送" if result.get("ok") else "发送失败")
+    print(_success_message(result) if result.get("ok") else "发送未完成")
     return 0 if result.get("ok") else 1
 
 

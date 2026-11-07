@@ -1,3 +1,10 @@
+## 2026-11-07 - Reconcile deployed application source
+
+- Recover current reusable tools, stable account bindings, conservative capture,
+  attributed shared memory, and sticker/voice utilities.
+- Add synthetic memory regression tests and private configuration templates.
+- See docs/source-reconciliation.md for scope and remaining un-deployed repairs.
+
 # Changelog
 
 ## v0.2.6 — 2026-11-01

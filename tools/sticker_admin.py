@@ -37,7 +37,7 @@ MAX_BYTES = 2 * 1024 * 1024
 MIN_BYTES = 20 * 1024
 MIN_DIM = 240
 MAX_DIM = 800
-STYLES = {"cat", "pig", "anime", "seio", "generic", "text", "silly"}
+STYLES = {"cat", "pig", "anime", "seio", "learned", "generic", "text", "silly"}
 
 CATEGORY_DESCRIPTIONS = {
     "happy": "开心、庆祝、积极反馈、好消息",
@@ -69,6 +69,8 @@ PACK_STYLES = {
     "seio": "seio",
     "bluefish": "silly",
     "chinesebqb": "generic",
+    "learned-master": "learned",
+    "learned-xi": "learned",
 }
 
 STYLE_LABELS = {
@@ -76,6 +78,7 @@ STYLE_LABELS = {
     "pig": "猪猪",
     "anime": "可爱二次元",
     "seio": "蓝发二次元（少量）",
+    "learned": "学到的表情",
     "generic": "通用",
     "text": "文字梗",
     "silly": "大肥鱼/沙雕",
@@ -214,7 +217,9 @@ def scan():
         seen.add(digest)
         pack, category, style = _infer_meta(path, c.STICKER_DIR)
         animated = os.path.splitext(path)[1].lower() == ".gif"
-        label = _label_from_path(path) or f"官方·{digest[:4]}"
+        label = _label_from_path(path) or (
+            f"学习的表情·{digest[:4]}" if pack.startswith("learned-") else f"官方·{digest[:4]}"
+        )
         entry = {
             "id": f"{pack}_{digest[:8]}",
             "file": rel,

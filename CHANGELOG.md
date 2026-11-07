@@ -1,3 +1,9 @@
+## 2026-11-07 - Sync deployed capture and midnight interval repairs
+
+- Recognize generated care/reminder prompts during conservative capture.
+- Preserve the proactive minimum interval across midnight.
+- Add 15 synthetic checks, with one expected failure for a pre-existing legacy marker false-positive.
+
 ## 2026-11-07 - Reconcile deployed application source
 
 - Recover current reusable tools, stable account bindings, conservative capture,

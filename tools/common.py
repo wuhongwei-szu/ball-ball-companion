@@ -306,20 +306,27 @@ def proactive_remaining(target):
     """Return (remaining_messages, reason). 0 means wait; a huge number = unlimited."""
     if PROACTIVE_DAILY_LIMIT <= 0:
         return 10**9, ""
-    _, entry = _outbound_entry(target)
+    state, entry = _outbound_entry(target)
     count = int(entry.get("proactive", 0) or 0)
     if count >= PROACTIVE_DAILY_LIMIT:
         return 0, f"今天主动消息已达本地安全上限 {PROACTIVE_DAILY_LIMIT} 条"
     if PROACTIVE_MIN_GAP_SECONDS > 0:
-        last = entry.get("last_proactive", "")
-        try:
-            when = datetime.datetime.fromisoformat(last)
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=_local_now().tzinfo)
-        except Exception:
-            when = None
+        now = _local_now()
+        when = None
+        # Midnight resets the daily count, not the minimum send interval.
+        for previous in state.get(target, {}).values():
+            if not isinstance(previous, dict):
+                continue
+            try:
+                stamp = datetime.datetime.fromisoformat(previous.get("last_proactive", ""))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=now.tzinfo)
+            except (TypeError, ValueError):
+                continue
+            if when is None or stamp > when:
+                when = stamp
         if when:
-            elapsed = (_local_now() - when).total_seconds()
+            elapsed = (now - when).total_seconds()
             if elapsed < PROACTIVE_MIN_GAP_SECONDS:
                 return 0, (
                     f"距上条主动消息 {int(elapsed)} 秒，"

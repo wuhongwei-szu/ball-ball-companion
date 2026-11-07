@@ -31,12 +31,12 @@ Python syntax and repository secret scan passed. Thirteen synthetic shared
 memory tests passed on Windows, without production configuration or sending.
 This is not an end-to-end delivery test or a complete service regression pass.
 
-Two proposed Python repairs (capture fallback and proactive budget edge cases)
-are NOT included in this snapshot: they were not yet deployed at reconciliation.
-Old audit archives are reference material, not a deployable production baseline.
-Their useful timeout, archival-failure and budget tests should be adapted in
-follow-up changes rather than replacing the live implementation wholesale.
-
+The two small Python repairs were subsequently deployed and synchronized:
+capture now recognizes generated care/reminder templates, and the proactive
+minimum interval survives midnight. The original legacy marker substring
+false-positive remains documented as an expected test failure. Unlimited-budget
+semantics are unchanged; the old audit archive's broader budget refactor was
+not deployed. Tests use synthetic state and never import private configuration.
 The installed cc-connect build has additional Go account-routing, timer and
 memory-bridge changes. Its maintained source is retained locally. This commit
 does not claim that upstream Go sources or the installed binary are mirrored

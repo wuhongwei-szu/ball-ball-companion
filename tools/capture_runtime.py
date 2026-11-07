@@ -236,6 +236,17 @@ def review_count(state):
                for entry in channel["sessions"].values() for item in entry["review"])
 
 
+def is_synthetic_prompt(text):
+    """Retain legacy filtering and recognize the generated care/reminder templates."""
+    if any(marker in text for marker in (
+            "每日要闻", "静默记忆整理任务", "主动关心任务", "【系统通知】")):
+        return True
+    return (text.startswith(("【上下文关怀】现在是 ", "【定时提醒】现在是 "))
+            and "/tools/chat_burst.py " in text
+            and "--proactive" in text
+            and "NO_REPLY" in text)
+
+
 def capture(common):
     if not common.SESSION_FILE:
         fail("session_unconfigured")
@@ -299,8 +310,7 @@ def capture(common):
                 elif entry["synthetic_pending"] and role == "assistant":
                     entry["synthetic_pending"] = False
                 elif role == "user":
-                    entry["synthetic_pending"] = any(marker in text for marker in (
-                        "每日要闻", "静默记忆整理任务", "主动关心任务", "【系统通知】"))
+                    entry["synthetic_pending"] = is_synthetic_prompt(text)
                     append = not entry["synthetic_pending"]
                 elif text.upper() != "NO_REPLY":
                     add_review(entry, index, "assistant_unverified")

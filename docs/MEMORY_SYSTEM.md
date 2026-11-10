@@ -1,10 +1,15 @@
 # Memory system
 
+This branch adds review candidates, not an automatic production rollout. See
+[maintenance-candidates.md](maintenance-candidates.md) for exact-source exclusions,
+private configuration, bounded coverage and remaining bypass paths.
+
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `memory/raw/s1|s2/YYYY-MM-DD.md` | Redacted raw transcripts |
+| `memory/companion.sqlite3` | Attributed source statements and versioned facts, private |
+| `memory/raw/s1|s2/YYYY-MM-DD.md` | Redacted captured/outbound records, not a complete delivery ledger |
 | `memory/notes/s1|s2/YYYY-MM-DD.md` | Daily notes written by the agent |
 | `memory/MEMORY.md` | Shared long-term memory |
 | `memory/STATE.md` | Mood label / energy / relationship temperature / small daily note (≤8 lines) |
@@ -18,17 +23,28 @@
 
 ## Flow
 
-1. **Capture** — `capture_transcripts.py` runs every 5 minutes and appends new
-   messages from the cc-connect session JSON to `memory/raw/`.
-2. **Send logging** — `send_msg.py` appends each outgoing bubble to raw and
-   recent replies.
-3. **Consolidate** — the `memcons01` cron runs at 03:17, reads recent raw and
-   notes, updates `MEMORY.md`, `EVENTS.md`, `STATE.md`, `THREADS.md`, and can
-   create future reminders.
-4. **Recall** — a new agent thread reads `PERSONA.md`, `MEMORY.md`, `STATE.md`,
-   `THREADS.md`, and `recent_replies.md` before its first reply. For older
-   details, `memory_search.py "关键词"` returns a few short snippets; if nothing
-   matches, say so instead of guessing.
+1. **Capture:** the deployment's recurring capture task uses session-scoped
+   checkpoints and continuity checks. Proven-new user records can be captured;
+   uncorrelated assistant history is withheld. It is not a backfill command.
+2. **Send recording:** existing send tools append outgoing text to raw/recent
+   records. Stored text does not itself prove recipient receipt.
+3. **Structured memory:** stable identity bindings keep speaker and subject
+   distinct. Corrections version facts instead of overwriting original sources.
+   Private/restricted material is not automatically shared between entrances.
+4. **Candidate exclusion:** exact speaker/source pairs are checked during ingest,
+   learning, recall and capture. Legacy matches use exact path/block metadata.
+   The public example is empty; actual reviewed bindings stay local.
+5. **Candidate consolidation:** the read-only exporter provides bounded eligible
+   source statements, grounded facts and reviewed historical blocks. The template
+   uses only that input, stops on error/empty output, preserves unrelated state
+   and creates no reminders. Enabling it in the real cron is a separate operation.
+6. **Recall:** use the source-aware search tool for past details, retain dates and
+   attribution, and do not upgrade old statements into current facts. Missing
+   results or truncated exports do not imply deletion or justify guessing.
+
+The exclusion hooks do not erase original records, universally block direct
+reads/writes, remove existing model context or identify unbound replays with new
+IDs. Do not describe this candidate as complete forgetting or deletion.
 
 ## Redaction
 
@@ -49,6 +65,7 @@ that `memory/` and `backups/` are gitignored and must never be committed.
 
 ## Sharing between two bots
 
-Both bots share `MEMORY.md`, `STATE.md`, and `EVENTS.md`. Daily notes are kept
-per user (`s1` / `s2`) and merged during consolidation. This gives one persona
-and one long-term memory while keeping the two chat channels separate.
+Both entrances share one persona and common experiences, not unrestricted access
+to each other's private conversations. Keep per-person preferences, source
+attribution and confidentiality boundaries. Session labels s1/s2 are deployment
+references, not immutable identities; review mappings after session rotation.

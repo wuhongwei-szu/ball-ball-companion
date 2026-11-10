@@ -1,5 +1,7 @@
 import ast, datetime, json, tempfile, types, unittest, contextlib, io
 from pathlib import Path
+import sys
+from unittest.mock import patch
 P=Path(__file__).resolve().parents[1]/'tools'
 def functions(path,names,env):
  tree=ast.parse(path.read_text(encoding='utf-8'))
@@ -7,7 +9,8 @@ def functions(path,names,env):
  assert len(nodes)==len(names)
  exec(compile(ast.Module(body=nodes,type_ignores=[]),str(path),'exec'),env)
  return env
-cap={}
+sys.path.insert(0,str(P))
+cap={'__file__':str(P/'capture_runtime.py')}
 exec(compile((P/'capture_runtime.py').read_text(encoding='utf-8'),'capture_runtime.py','exec'),cap)
 c=functions(P/'common.py',{'_outbound_entry','proactive_remaining'},dict(datetime=datetime,re=__import__('re')))
 tree=ast.parse((P/'care_scheduler.py').read_text(encoding='utf-8'))
@@ -16,6 +19,9 @@ fake=types.SimpleNamespace(LABELS={'master':'Owner'},WORK_DIR='C:/example-compan
 rem=functions((P/'add_reminder.py'),{'build_prompt'},{'c':fake})['build_prompt']('master','2026-11-07 12:00','example','note')
 class Checks(unittest.TestCase):
  def setUp(self):
+  gate=cap['exclusions'].Gate(dict(version=1,excluded=[],legacy=[],reviewed=[],quarantine_paths=[]))
+  mock=patch.object(cap['exclusions'].Gate,'load',return_value=gate)
+  mock.start();self.addCleanup(mock.stop)
   self.now=datetime.datetime.fromisoformat('2026-11-08T00:01:00+08:00')
   self.state={}
   c.update(_local_now=lambda:self.now,load_json=lambda *a:self.state,OUTBOUND_STATE_FILE='unused',PROACTIVE_DAILY_LIMIT=4,PROACTIVE_MIN_GAP_SECONDS=300)

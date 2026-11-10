@@ -48,3 +48,11 @@ from them is copied, except where explicitly noted.
 The original deployment from which this repository was extracted used a
 private persona, private memories, and private bot credentials. Those are not
 included. Use the templates under `prompts/` and your own local configuration.
+
+## Maintained bridge patch
+
+`patches/cc-connect/queue-safety.patch` contains a focused maintenance diff with
+small upstream/maintained context hunks and new synthetic tests. Upstream
+attribution and the source/asset distribution boundary are documented in
+`patches/cc-connect/README.md` and `docs/cc-connect-source-audit.md`. No full
+cc-connect source snapshot or compiled web assets are included.

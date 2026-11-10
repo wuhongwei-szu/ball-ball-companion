@@ -22,6 +22,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+from text_input import read_json_text
 
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -507,8 +508,18 @@ def main():
         print(_success_message(result) if result.get("ok") else "发送未完成")
         return 0 if result.get("ok") else 1
 
-    message = " ".join(args) if args else sys.stdin.read()
-    message = message.strip()
+    if args and args[0] == "--json-stdin":
+        if len(args) != 1:
+            print("--json-stdin cannot be combined with positional text")
+            return 1
+        try:
+            message = read_json_text()
+        except ValueError as exc:
+            print(f"Invalid text input: {exc}")
+            return 1
+    else:
+        message = " ".join(args) if args else sys.stdin.read()
+        message = message.strip()
     if not message:
         print("消息为空")
         return 1

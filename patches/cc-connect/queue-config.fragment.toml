@@ -1,0 +1,3 @@
+# Optional candidate setting. Apply only during an authorized, verified maintenance window.
+[queue]
+max_depth = 10

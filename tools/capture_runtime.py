@@ -13,6 +13,8 @@ import re
 import secrets
 import sys
 import tempfile
+from pathlib import Path
+import memory_exclusion as exclusions
 
 
 ABSENT = object()
@@ -254,6 +256,7 @@ def capture(common):
     if not isinstance(cfg, dict):
         fail("invalid_config")
     # Validate current inputs before touching even the v2 lock/checkpoint.
+    gate = exclusions.Gate.load(Path(__file__).resolve().parents[1])
     channels = resolve_channels(read_json(common.SESSION_FILE), cfg)
     path = common.CAPTURE_STATE_FILE + ".v2"
     with locked(path):
@@ -315,6 +318,10 @@ def capture(common):
                 elif text.upper() != "NO_REPLY":
                     add_review(entry, index, "assistant_unverified")
                     withheld += 1
+                if append:
+                    speaker = "master" if channel == "s1" else "xi"
+                    sid = state["channels"][channel]["active"]
+                    append = gate.allowed(exclusions.capture_id(sid, index), speaker)
                 if append:
                     entry["pending"] = {"index": index}
                     # Cursor must describe all preceding inspected records.

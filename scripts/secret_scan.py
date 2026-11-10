@@ -21,14 +21,13 @@ RULES = [
     ("slack-token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
     ("ilink-bot-token", re.compile(r"[A-Za-z0-9_-]+@im\.bot:[0-9a-fA-F]{8,}")),
     ("weixin-openid", re.compile(r"o[0-9A-Za-z_-]{20,}@im\.wechat")),
-    ("windows-user-path", re.compile(r"C:\\\\Users\\\\[^\\\s\"']+")),
-    ("personal-username", re.compile(r"\b20251\b")),
+    ("windows-user-path", re.compile(r"""(?i)[A-Z]:[\\/]+Users[\\/]+[^\\/\s"\']+""")),
     ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
 
 TEXT_EXT = {
     ".py", ".ps1", ".psm1", ".md", ".toml", ".json", ".yaml", ".yml",
-    ".txt", ".bat", ".cmd", ".vbs", ".c", ".h", ".example", ".env",
+    ".txt", ".bat", ".cmd", ".vbs", ".c", ".h", ".go", ".diff", ".patch", ".example", ".env",
 }
 
 

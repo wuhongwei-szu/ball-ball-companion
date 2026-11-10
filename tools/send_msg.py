@@ -8,12 +8,14 @@ Usage:
 
 Use one call per chat bubble. End the agent turn with NO_REPLY.
 """
+import json
 import os
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+from text_input import read_json_text
 
 
 def send_master(text):
@@ -34,7 +36,7 @@ def send_master(text):
     return 0
 
 
-def send_xi(text, relay=False):
+def send_xi(text, relay=False, *, lossless=False):
     c.require(c.XI_SESSION, "xi_session（从 session 文件推导）")
     # Select one transport before sending. A nonzero/unknown cc-connect result
     # may follow a successful send, so never retry it through direct iLink.
@@ -58,8 +60,16 @@ def send_xi(text, relay=False):
         print("文字发送结果未确认（cc-connect 返回非零状态）；不会切换通道补发，请先核实送达，不要重试。")
         return 1
     helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "send_xi.py")
+    command = [sys.executable, "-X", "utf8", helper]
+    stdin = {}
+    if lossless:
+        command.append("--json-stdin")
+        stdin["input"] = json.dumps(text, ensure_ascii=True)
+    else:
+        command.append(text)
     result = subprocess.run(
-        [sys.executable, "-X", "utf8", helper, text],
+        command,
+        **stdin,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     output = (result.stdout or "").strip()
@@ -77,11 +87,18 @@ def main():
     relay = "--relay" in args
     if relay:
         args.remove("--relay")
-    if len(args) < 2:
+    lossless = "--json-stdin" in args
+    if lossless:
+        args.remove("--json-stdin")
+    if (lossless and len(args) != 1) or (not lossless and len(args) < 2):
         print('用法: python -X utf8 send_msg.py master|xi [--relay] "消息"')
         return 1
     target = args[0].lower()
-    text = " ".join(args[1:]).strip()
+    try:
+        text = read_json_text() if lossless else " ".join(args[1:]).strip()
+    except ValueError as exc:
+        print(f"Invalid text input: {exc}")
+        return 1
     if not text:
         print("消息为空")
         return 1
@@ -89,7 +106,7 @@ def main():
     if target == "master":
         return send_master(text)
     if target == "xi":
-        return send_xi(text, relay=relay)
+        return send_xi(text, relay=relay, lossless=lossless)
     print("目标必须是 master 或 xi")
     return 1
 

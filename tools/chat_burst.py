@@ -19,6 +19,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+from text_input import read_json_text
 import send_msg
 import send_sticker
 
@@ -48,16 +49,16 @@ def _delays(count, min_delay, max_delay, first_delay):
     return delays
 
 
-def _send_text(target, text):
+def _send_text(target, text, *, lossless=False):
     if target == "master":
         return send_msg.send_master(text)
-    return send_msg.send_xi(text)
+    return send_msg.send_xi(text, lossless=lossless)
 
 
 def main():
     parser = argparse.ArgumentParser(description="发短消息 + 可选 1 张表情")
     parser.add_argument("target", choices=["master", "xi"])
-    parser.add_argument("messages", nargs="+", help="每条气泡一句话")
+    parser.add_argument("messages", nargs="*", help="每条气泡一句话")
     parser.add_argument("--sticker", help="合适的表情分类；默认发送，不再重复抽概率")
     parser.add_argument("--sticker-prefer", help="按标签/文字偏好筛选，如 贴贴,抱,合十,击掌")
     parser.add_argument("--style", choices=["cat", "pig", "anime", "seio", "learned", "generic", "text", "silly"])
@@ -68,10 +69,19 @@ def main():
     parser.add_argument("--first-delay", type=float, default=None)
     parser.add_argument("--force-sticker", action="store_true", help="测试用：跳过表情冷却")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json-stdin", action="store_true", help="read an exact UTF-8 JSON string array from stdin")
     args = parser.parse_args()
+    if args.json_stdin and args.messages:
+        parser.error("--json-stdin cannot be combined with positional messages")
+    if not args.json_stdin and not args.messages:
+        parser.error("messages are required unless --json-stdin is used")
     c.assert_target(args.target)
 
-    messages = [m.strip() for m in args.messages if m.strip()]
+    try:
+        messages = read_json_text(many=True) if args.json_stdin else [m.strip() for m in args.messages if m.strip()]
+    except ValueError as exc:
+        print(f"Invalid text input: {exc}")
+        return 1
     if not messages:
         print("消息为空")
         return 1
@@ -137,7 +147,7 @@ def main():
         delay = delays[index - 1]
         if delay > 0:
             time.sleep(delay)
-        code = _send_text(args.target, text)
+        code = _send_text(args.target, text, lossless=args.json_stdin)
         if code != 0:
             print(f"[chat] 第 {index} 条文字发送失败，停止后续发送（已发送 {index - 1} 条）")
             return code

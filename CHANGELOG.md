@@ -1,3 +1,16 @@
+## 2026-11-11 - Review candidates, not a production deployment
+
+- Add explicit UTF-8 JSON stdin for lossless text transport and synthetic parity tests.
+- Add exact-source memory exclusions, a bounded read-only consolidation exporter,
+  an empty public configuration example and synthetic regression tests.
+- Refresh generic persona/runtime templates, stable-account setup instructions,
+  and maintenance/rollback documentation without private bindings or chat content.
+- Include a focused maintained cc-connect queue diagnostic patch; no full bridge
+  source snapshot, binary or production configuration is published.
+- Include Go source and patch/diff files in the repository secret scan.
+- Missing/invalid exclusion configuration fails closed. See
+  docs/maintenance-candidates.md before enabling changed entry points.
+
 ## 2026-11-07 - Sync deployed capture and midnight interval repairs
 
 - Recognize generated care/reminder prompts during conservative capture.

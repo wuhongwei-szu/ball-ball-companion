@@ -2,63 +2,55 @@
 
 ## One-shot reminders
 
-`add_reminder.py` wraps cc-connect 1.5's built-in timer:
+Create a reminder only on an explicit request. A future plan or a request to
+draft a notice is not itself permission to create a timer. Resolve the target,
+calendar date and ambiguous AM/PM first; inspect the resulting timer before
+confirming success.
 
 ```bash
-python -X utf8 tools/add_reminder.py \
-  --owner master --date 2026-11-10 --time 07:30 \
+python -X utf8 tools/add_reminder.py \\
+  --owner master --date 2026-11-10 --time 07:30 \\
   --title "体测" --note "带水、运动鞋，别迟到"
 ```
 
-It creates a `timer add --at ...` job targeting the owner's session. At the
-due time cc-connect injects a prompt into a fresh side session; the agent
-reads `PERSONA.md` / `MEMORY.md` / `STATE.md` / `THREADS.md`, writes a
-personalized reminder via `chat_burst.py --proactive`, and ends with
-`NO_REPLY`. A sticker is optional; it counts toward the “1 proactive sticker
-per day” cap and should be omitted for urgent or serious reminders.
+The tool uses cc-connect's timer with a stable account binding. Ordinary quiet
+hours are 23:00–07:00; explicitly requested exceptions use `--allow-night`.
+Changing a reminder requires reconciling its actual timer ID, not merely editing
+notes. Preserve unrelated timers and execution markers. An uncertain creation
+or send result must be investigated before retrying.
 
-- `--owner master|xi|both`
-- Rejects times in 23:00-07:00 unless `--allow-night`
-- Deduplicates by owner/date/time/title in `memory/reminders.json`
-- Requires cc-connect to be running (it uses the local API socket)
+## Per-recipient care
 
-## Random care
+The current `per_recipient_v1` scheduler plans one opportunity for master and
+one for xi. Times are randomized within 08:30–21:30 with at least two hours
+between them. A late start can leave fewer slots; expired opportunities are not
+backfilled. Existing same-day and legacy plans are retained instead of rerolled.
 
-`care_scheduler.py` runs from the `careplan01` cron at 08:17:
+Each opportunity evaluates only its recipient. Recent conversation, a request
+not to be disturbed, repeated unanswered outreach, unclear identity, stale
+context or an uncertain previous send can suppress it. An opportunity does not
+guarantee a message.
 
-- Rolls 0-2 opportunities with weights 55/32/13.
-- A day with 0 opportunities sends nothing.
-- Times are random between 08:30 and 21:30, at least 2 hours apart.
-- No proactive care at 23:00-07:00.
-- Proactive messages share a local safety budget: 4 messages/24h and a
-  5-minute gap, below the observed iLink 4-6/24h server limit. Each care
-  opportunity sends at most 2 bubbles.
-- Each opportunity is only a chance: the agent decides from `STATE.md`,
-  `MEMORY.md`, `EVENTS.md`, `THREADS.md`, and recent raw context whether there
-  is a real reason to message. If not, it replies `NO_REPLY`.
-- Proactive messages use `chat_burst.py --proactive`; iLink may still throttle
-  with `ret=-2`; stop and wait, never retry in a loop.
+`chat_burst.py --proactive` permits at most two outgoing items, including an
+optional sticker. Each recipient has a separate default budget of four proactive
+messages per local calendar day and a five-minute minimum gap. The daily count
+resets at midnight; the gap does not. This is not a rolling 24-hour allowance or
+an official iLink limit. Server throttling such as `ret=-2` still applies.
 
-This follows patterns from SillyTavern Time-Awareness (probabilistic triggers),
-dsh-proactive / whalecare (daily limit and quiet hours), and cc-connect timers.
+## Configuration
 
-## Tuning
+- `WINDOW_START_MIN` / `WINDOW_END_MIN`: active planning window.
+- `MIN_GAP_MIN`: spacing between opportunities.
+- `proactive_daily_limit` / `proactive_min_gap_seconds`: local sending limits.
+- Stable `master_account_id` and `xi_account_id` bindings are required.
 
-Edit the constants in `care_scheduler.py`:
+Do not use manual test switches on live accounts without explicit send
+permission. Repository tests use synthetic state and mocked transport.
 
-- `WEIGHTS` — how often 0/1/2 opportunities occur
-- `WINDOW_START_MIN` / `WINDOW_END_MIN` — safe active window
-- `MIN_GAP_MIN` — spacing between opportunities
-- `MAX_TIMERS` — daily cap
+## Verification
 
-## Troubleshooting
-
-- `No pending timers.` — no upcoming reminders.
-- `cc-connect is not running (socket not found)` — start cc-connect first.
-- `context_token` expired — the secondary user must message their bot first.
-- Timer fired but no message — the agent may have decided `NO_REPLY`; check
-  the logs and `memory/raw/`.
-- `消息发送过快，请稍后再试` — cc-connect's incoming per-session rate limit
-  (default 20/60s), not the model. Set `[rate_limit] max_messages = 0` for a
-  trusted single user, or wait.
-- `send budget exhausted` — local cc-connect guard; v1.5.0 counts replies too. Use `burst_limit=20` and `burst_window_secs=60` per Weixin platform. Gateway rejections must be handled separately; do not repeatedly retry.
+Timer creation, task processing, API acceptance and recipient receipt are
+separate outcomes. A stored response or `NO_REPLY` alone does not prove delivery.
+For `context_token` expiry, the recipient may need to message the correct bot.
+For a local guard or gateway rejection, stop and inspect the specific failure;
+do not relogin, switch transports or replay automatically.

@@ -22,6 +22,8 @@ class SharedMemoryTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         (self.root / "config").mkdir()
+        (self.root / "config/memory_exclusions.json").write_text(json.dumps({
+            "version": 1, "excluded": [], "legacy": [], "reviewed": [], "quarantine_paths": []}), encoding="utf-8")
         self.cfg = {"version": 1, "project": "fixture", "subjects": {
             role: {"account": role+"-bot", "session_key": "weixin:dm:"+role,
                    "user_id": role} for role in ("master", "xi")}}
@@ -112,6 +114,7 @@ class SharedMemoryTests(unittest.TestCase):
         tools=self.root/"tools";tools.mkdir()
         shutil.copy2(HERE/"tools/companion_memory.py",tools)
         shutil.copy2(HERE/"tools/memory_search.py",tools)
+        shutil.copy2(HERE/"tools/memory_exclusion.py",tools)
         request=self.req("xi","我喜欢桂花茶")
         env={**os.environ,"CC_PROJECT":"fixture","CC_PLATFORM_ACCOUNT":"xi-bot",
              "CC_SESSION_KEY":"weixin:dm:xi"}

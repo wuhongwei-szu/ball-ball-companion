@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import memory_exclusion as exclusions
 
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = {"master": "主人", "xi": "Partner", "shared": "共同经历"}
@@ -88,6 +89,7 @@ def database(root=ROOT):
 
 
 def put_fact(db, source, subject, key, value, quote, confidential=False):
+    exclusions.for_database(db).require(source["id"], source["speaker"])
     if subject not in (source["speaker"], "shared"):
         raise MemoryError("subject_not_supported_by_speaker")
     if not key or len(key) > 80 or not value or len(value) > 600:
@@ -116,6 +118,8 @@ def ingest(db, request, speaker):
         return None
     source_id = hashlib.sha256(json.dumps([request["project"], request["account"],
                                            request["message_id"]]).encode()).hexdigest()
+    if not exclusions.for_database(db).allowed(source_id, speaker):
+        return None
     at = request.get("at") or now()
     dt.datetime.fromisoformat(at.replace("Z", "+00:00"))
     with db:
@@ -154,8 +158,10 @@ def score(text, query):
 
 
 def recall(db, viewer, query="", limit=10):
+    gate = exclusions.for_database(db)
     facts = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
                           WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""", (viewer,)).fetchall()
+    facts = [f for f in facts if gate.allowed(f["source"], f["speaker"])]
     facts = sorted(facts, key=lambda f: (score(f["key"]+f["value"], query),
                                       f["subject"] == viewer, f["id"]), reverse=True)[:limit]
     result = [{"kind": "current_fact", "subject": f["subject"], "key": f["key"],
@@ -164,6 +170,7 @@ def recall(db, viewer, query="", limit=10):
     if query:
         events = db.execute("""SELECT * FROM sources WHERE (restricted=0 OR speaker=?)
             AND id NOT IN (SELECT source FROM facts WHERE active=0) ORDER BY at DESC LIMIT 200""", (viewer,)).fetchall()
+        events = [s for s in events if gate.allowed(s["id"], s["speaker"])]
         events = sorted(events, key=lambda s: score(s["text"], query), reverse=True)
         for item in events:
             if score(item["text"], query) > 1:

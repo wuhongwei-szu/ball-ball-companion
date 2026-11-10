@@ -10,6 +10,7 @@ import companion_memory as memory
 
 def legacy(query, viewer, root=memory.ROOT, limit=4):
     root = Path(root)
+    gate = memory.exclusions.Gate.load(root)
     with memory.database(root) as db:
         obsolete = [r[0] for r in db.execute("SELECT value FROM facts WHERE active=0")]
     paths = list((root / "memory").glob("*.md"))
@@ -22,6 +23,9 @@ def legacy(query, viewer, root=memory.ROOT, limit=4):
         text = path.read_text(encoding="utf-8", errors="replace")
         blocks = re.split(r"(?m)^##\s+", text) if "raw" in path.parts else text.splitlines()
         for block in blocks:
+            relative = path.relative_to(root).as_posix()
+            if not gate.legacy_allowed(relative, block):
+                continue
             block = re.sub(r"\s+", " ", block).strip()
             if not block or block.startswith(("#", ">")) or memory.SECRET.search(block):
                 continue

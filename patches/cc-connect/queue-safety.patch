@@ -1,0 +1,239 @@
+--- a/core/engine.go
++++ b/core/engine.go
+@@ -2786,6 +2786,7 @@
+ 	}
+ 
+ 	slog.Info("message received",
++		"message_ref", queueMessageRef(msg),
+ 		"platform", msg.Platform, "msg_id", msg.MessageID,
+ 		"session", msg.SessionKey, "user", msg.UserName,
+ 		"content_len", len(msg.Content),
+@@ -3129,10 +3130,20 @@
+ 	return newSession
+ }
+ 
++// queueMessageRef links admission diagnostics without logging identifiers or content.
++// Missing platform message IDs cannot provide reliable per-message correlation.
++func queueMessageRef(msg *Message) string {
++	if msg.MessageID == "" {
++		return "unavailable"
++	}
++	digest := sha256.Sum256([]byte(msg.Platform + "\x00" + msg.SessionKey + "\x00" + msg.MessageID))
++	return hex.EncodeToString(digest[:16])
++}
++
+ // queueMessageForBusySession queues a message for later delivery when the
+ // session is busy. The message is NOT sent to agent stdin at queue time;
+ // the event loop sends it after the current turn's EventResult is received.
+-// Returns true if the message was successfully queued, false otherwise.
++// Returns true if handled (queued, stale, or rejected); false if no live state exists.
+ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiveKey string) bool {
+ 	e.interactiveMu.Lock()
+ 	state, hasState := e.interactiveStates[interactiveKey]
+@@ -3165,8 +3176,17 @@
+ 	}
+ 	if len(state.pendingMessages) >= e.maxQueuedMessages {
+ 		depth := len(state.pendingMessages)
+-		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), depth))
+-		return true // handled: queue-full reply sent
++		ref := queueMessageRef(msg)
++		slog.Warn("message rejected: queue full", "message_ref", ref,
++			"queue_depth", depth, "queue_limit", e.maxQueuedMessages,
++			"has_images", len(msg.Images) > 0)
++		err := e.replyWithError(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), depth))
++		status := "platform_accepted"
++		if err != nil {
++			status = "failed"
++		}
++		slog.Info("queue rejection notification result", "message_ref", ref, "status", status)
++		return true // handled rejection; never accepted into the processing queue
+ 	}
+ 	state.pendingMessages = append(state.pendingMessages, queuedMessage{
+ 		messageID:         msg.MessageID,
+@@ -3196,6 +3216,9 @@
+ 	)
+ 
+ 	slog.Info("message queued for busy session",
++		"message_ref", queueMessageRef(msg),
++		"has_images", len(msg.Images) > 0,
++		"queue_limit", e.maxQueuedMessages,
+ 		"session", msg.SessionKey,
+ 		"user", msg.UserName,
+ 		"queue_depth", queueDepth,
+--- a/core/i18n.go
++++ b/core/i18n.go
+@@ -746,11 +746,11 @@
+ 		LangSpanish:            "📬 Mensaje recibido — se procesará después de que termine la tarea actual.",
+ 	},
+ 	MsgQueueFull: {
+-		LangEnglish:            "📬 Message queue is full (%d pending). Please wait for current tasks to complete.",
+-		LangChinese:            "📬 消息队列已满（%d 条待处理）。请等待当前任务完成。",
+-		LangTraditionalChinese: "📬 訊息佇列已滿（%d 則待處理）。請等待目前任務完成。",
+-		LangJapanese:           "📬 メッセージキューが満杯です（%d 件待ち）。現在のタスク完了をお待ちください。",
+-		LangSpanish:            "📬 La cola de mensajes está llena (%d pendientes). Espere a que las tareas actuales se completen.",
++		LangEnglish:            "📬 Message queue is full (%d pending). This message was not queued. Please resend it after current tasks complete.",
++		LangChinese:            "📬 消息队列已满（%d 条待处理）。这条消息未加入队列，请等当前任务完成后重新发送。",
++		LangTraditionalChinese: "📬 訊息佇列已滿（%d 則待處理）。此訊息未加入佇列，請等目前任務完成後重新傳送。",
++		LangJapanese:           "📬 メッセージキューが満杯です（%d 件待ち）。このメッセージはキューに追加されていません。処理完了後に再送してください。",
++		LangSpanish:            "📬 La cola de mensajes está llena (%d pendientes). Este mensaje no se ha añadido. Vuelva a enviarlo cuando terminen las tareas actuales.",
+ 	},
+ 	MsgNoToolsAllowed: {
+ 		LangEnglish:            "No tools pre-allowed.\nUsage: `/allow <tool_name>`\nExample: `/allow Bash`",
+--- /dev/null
++++ b/core/queue_safety_test.go
+@@ -0,0 +1,155 @@
++package core
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"fmt"
++	"log/slog"
++	"strings"
++	"testing"
++)
++
++type queueFailPlatform struct {
++	stubPlatformEngine
++	calls int
++}
++
++func (p *queueFailPlatform) Reply(context.Context, any, string) error {
++	p.calls++
++	return errors.New("synthetic transport failure")
++}
++
++func TestQueueSafetyImageBurst(t *testing.T) {
++	for _, limit := range []int{5, 10} {
++		t.Run(fmt.Sprint(limit), func(t *testing.T) {
++			p := &stubPlatformEngine{n: "test"}
++			e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
++			if limit == 10 {
++				e.SetMaxQueuedMessages(10)
++			}
++			key := "synthetic-session"
++			state := &interactiveState{}
++			e.interactiveStates[key] = state
++			accepted := 0
++			for i := 0; i < limit+1; i++ {
++				msg := &Message{Platform: "test", SessionKey: key, MessageID: fmt.Sprint(i), Images: []ImageAttachment{{MimeType: "image/png", Data: []byte{1, 2, 3}}}, OnAccepted: func() { accepted++ }}
++				if !e.queueMessageForBusySession(p, msg, key) {
++					t.Fatal("not handled")
++				}
++			}
++			if len(state.pendingMessages) != limit || accepted != limit {
++				t.Fatalf("depth=%d accepted=%d", len(state.pendingMessages), accepted)
++			}
++			for i, q := range state.pendingMessages {
++				if q.messageID != fmt.Sprint(i) || q.content != "" || len(q.images) != 1 {
++					t.Fatalf("FIFO/image mismatch at %d", i)
++				}
++			}
++			if limit == 10 && state.pendingMessages[5].messageID != "5" {
++				t.Fatal("sixth image missing")
++			}
++		})
++	}
++}
++
++func TestQueueSafetyRejectedNotification(t *testing.T) {
++	for _, failed := range []bool{false, true} {
++		t.Run(fmt.Sprint(failed), func(t *testing.T) {
++			var logs bytes.Buffer
++			old := slog.Default()
++			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
++			defer slog.SetDefault(old)
++			base := &stubPlatformEngine{n: "test"}
++			bad := &queueFailPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
++			var p Platform = base
++			if failed {
++				p = bad
++			}
++			e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
++			e.SetMaxQueuedMessages(1)
++			key := "synthetic-private-session"
++			state := &interactiveState{}
++			e.interactiveStates[key] = state
++			first := &Message{Platform: "test", SessionKey: key, MessageID: "synthetic-private-first"}
++			if !e.queueMessageForBusySession(p, first, key) {
++				t.Fatal("first not handled")
++			}
++			accepted := false
++			msg := &Message{Platform: "test", SessionKey: key, MessageID: "synthetic-private-overflow", Content: "synthetic-private-content", Images: []ImageAttachment{{Data: []byte{7}}}, OnAccepted: func() { accepted = true }}
++			before := bad.calls
++			if !e.queueMessageForBusySession(p, msg, key) || accepted || len(state.pendingMessages) != 1 {
++				t.Fatal("rejection changed queue/acceptance")
++			}
++			text := logs.String()
++			for _, want := range []string{"message queued for busy session", queueMessageRef(first), "message rejected: queue full", queueMessageRef(msg), "queue rejection notification result"} {
++				if !strings.Contains(text, want) {
++					t.Fatalf("missing %q", want)
++				}
++			}
++			status := "platform_accepted"
++			if failed {
++				status = "failed"
++				if bad.calls-before != 1 {
++					t.Fatal("unexpected retry")
++				}
++			}
++			if !strings.Contains(text, `"status":"`+status+`"`) {
++				t.Fatal("wrong notification status")
++			}
++			for _, secret := range []string{msg.MessageID, first.MessageID, msg.Content} {
++				if strings.Contains(text, secret) {
++					t.Fatal("raw private data in admission logs")
++				}
++			}
++		})
++	}
++}
++
++func TestQueueSafetyMessageRef(t *testing.T) {
++	a := &Message{Platform: "test", SessionKey: "s", MessageID: "1"}
++	b := *a
++	if queueMessageRef(a) != queueMessageRef(&b) || len(queueMessageRef(a)) != 32 {
++		t.Fatal("unstable reference")
++	}
++	b.SessionKey = "other"
++	if queueMessageRef(a) == queueMessageRef(&b) {
++		t.Fatal("session not scoped")
++	}
++	b.MessageID = ""
++	if queueMessageRef(&b) != "unavailable" {
++		t.Fatal("missing ID must be explicit")
++	}
++}
++
++func TestQueueSafetyReceivedCorrelation(t *testing.T) {
++	var logs bytes.Buffer
++	old := slog.Default()
++	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
++	defer slog.SetDefault(old)
++	p := &stubPlatformEngine{n: "test"}
++	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
++	e.SetMaxQueuedMessages(1)
++	key := "synthetic-busy-session"
++	session := e.sessions.GetOrCreateActive(key)
++	if !session.TryLock() {
++		t.Fatal("cannot lock session")
++	}
++	defer session.UnlockWithoutUpdate()
++	for i := 0; i < 2; i++ {
++		msg := &Message{Platform: "test", SessionKey: key, MessageID: fmt.Sprint(i), Images: []ImageAttachment{{MimeType: "image/png", Data: []byte{1}}}}
++		logs.Reset()
++		e.handleMessage(p, msg)
++		text := logs.String()
++		want := 2
++		if i == 1 {
++			want = 3
++		}
++		if strings.Count(text, queueMessageRef(msg)) != want {
++			t.Fatalf("received/admission refs do not correlate: %s", text)
++		}
++		if !strings.Contains(text, "message received") {
++			t.Fatal("missing received")
++		}
++	}
++}

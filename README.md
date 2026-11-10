@@ -5,15 +5,25 @@
 项目由 cc-connect 1.5.x 桥接微信，Codex CLI 作为本地 agent，默认使用 `gpt-6-luna`。
 仓库只包含通用代码、模板和文档；**不包含任何 token、openid、API key、聊天记忆或私人配置**。
 
+## 维护候选与部署范围
+
+当前分支新增无损 JSON 正文输入、按来源排除记忆、只读整理输入和公开提示词模板，
+并保留一份独立的 cc-connect 队列诊断补丁。**这些是待审查候选；提交到仓库不代表已部署。**
+缺少或无效的私有排除配置会使相关入口停止，不能直接覆盖正在运行的工具。
+
+- [模块、验证范围与部署边界](docs/maintenance-candidates.md)
+- [无损正文输入](docs/TEXT-TRANSPORT.md)
+- [应用源码对账](docs/source-reconciliation.md)与[桥接程序来源](docs/cc-connect-source-audit.md)
+
 ## 特性
 
 | 能力 | 说明 |
 |---|---|
 | 双 bot 共享人格 | 两个微信 bot 共用同一份 persona 与长期记忆，各自保留对话笔记 |
 | 多气泡聊天 | 用 `chat_burst.py` 发 1-3 条短消息并带自然停顿，最后用 `NO_REPLY` 抑制多余回复 |
-| 表情包 | 本地分类图库；脚本按概率、冷却、每日上限决定发不发；图片算独立出站消息 |
-| 事件提醒 | 说“下周二体测”，确认日期后用 cc-connect 内置 `timer` 到点提醒 |
-| 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；主动消息共享 4 条/24h 安全预算 |
+| 表情包 | 本地分类图库；按已选分类、冷却与每日上限发送，默认不做第二次概率抽选；图片算独立出站消息 |
+| 事件提醒 | 用户明确要求后，核对对象、日期与时段，再用 cc-connect 内置 `timer` 创建并验证 |
+| 随机关怀 | 每天每入口最多一次独立机会，时间在 08:30-21:30；有真实上下文才发送，每位接收者各有本地自然日预算 |
 | 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
@@ -52,9 +62,9 @@ work_dir/
     ├── sticker_admin.py       # 表情库 scan/validate/list/catalog/import
     ├── memory_search.py       # 本地记忆关键词检索
     ├── send_msg.py            # 单条发送 + 写原文
-    ├── send_xi.py             # 直连第二个 bot 的 ilink API（文本/图片）
+    ├── send_xi.py             # 第二个 bot 的账号绑定发送入口（文本/图片/文件）
     ├── add_reminder.py        # 创建一次性提醒（复用 cc-connect timer）
-    ├── care_scheduler.py      # 每天规划 0-3 次随机关怀
+    ├── care_scheduler.py      # 每天为每个入口规划一次上下文关怀机会
     ├── capture_transcripts.py # 捕获新对话
     ├── healthcheck.py
     ├── backup.ps1
@@ -106,16 +116,22 @@ work_dir/
    - `cc_data_dir`、`cc_config_file`
    - `session_file`：`%USERPROFILE%\.cc-connect\sessions\my-project_<hash>.json`
    - `master_session_id` / `xi_session_id`：通常是 `s1` / `s2`
-   - `xi_platform_index`：第二个 weixin 平台在配置中的序号（默认 2）
+   - `master_account_id` / `xi_account_id`：两个不同、唯一匹配的稳定 bot 账号 ID；不以平台列表顺序绑定身份
+   - `xi_platform_index` 是旧配置兼容字段，不再作为账号身份依据
    - `bot_name` / `labels`
 
    `bot.config.json` 不保存 token 或 openid；脚本运行时从 cc-connect 配置和
    session 文件读取。
 
+   共享结构化记忆还需要从 `config/shared_memory.example.json` 配置私有
+   `config/shared_memory.json`，包含绝对 Python 路径和经核对的身份绑定。
+   当前候选的排除配置与启用顺序见 [维护说明](docs/maintenance-candidates.md)。
+   公共示例不能替代真实绑定或部署验证。
+
 6. **渲染人格与规则模板**
 
    将 `prompts/PERSONA.template.md`、`prompts/AGENTS.template.md` 复制到工作目录为
-   `PERSONA.md`、`AGENTS.md`，替换 `{{...}}` 占位符。也可以用任何模板引擎渲染。
+   `PERSONA.md`、`AGENTS.md`，替换 `{{...}}` 占位符（包括 `{{TIMEZONE}}`）。也可以用任何模板引擎渲染。
 
 7. **启动 cc-connect**
 
@@ -147,8 +163,8 @@ python -X utf8 tools/chat_burst.py master --sticker affection \
   "主人，辛苦啦～" "今天是不是又忙了一整天？(｡•́︿•̀｡)"
 ```
 
-- 示例采用安全区：每 bot 每天最多 12 张表情、30 秒冷却；主动消息共享 4 条/24h、间隔 5 分钟的预算（低于 iLink 4-6/24h 的观察值）。`0` 可关闭某一项，但 iLink 服务端仍可能以 `ret=-2` 节流。
-- 图片是独立出站消息，和文字一起计入条数上限（最多 3 条文字 + 1 张表情）。
+- 示例采用安全区：每 bot 每天最多 12 张表情、30 秒冷却；主动消息按每位接收者每个本地自然日最多 4 条、间隔 5 分钟计数（不是滚动 24 小时配额或微信官方额度）。`0` 可关闭某一项，但 iLink 服务端仍可能以 `ret=-2` 节流。
+- 图片是独立出站消息，和文字一起计入上限：普通调用最多 6 条，主动调用最多 2 条；每次最多 1 张表情。
 - 无合适分类、本地安全上限、刚发过时只发文字；不要重试。
 - 简单确认或严肃说明用单条 `send_msg.py`，不要硬拆。
 
@@ -163,7 +179,7 @@ python -X utf8 tools/sticker_admin.py list
 ```
 
 用 `import` 导入自己的图库；用 `catalog` 生成分类说明。扫描会跳过小于 240px 或小于 20KB 的图，避免发出糊图。
-`send_xi.py --image` 直连第二个 bot 的 iLink 媒体上传，避免 cc-connect 多 bot 路由到错误的账号。
+`send_xi.py --image` / `--file` 在发送前按当前身份选择一个路由：当前已绑定 xi 会话使用 cc-connect，否则使用独立的 xi 直连入口。失败或结果不确定时不自动换路或重发。
 
 ### 语音（晓晓）
 
@@ -181,9 +197,12 @@ python -X utf8 tools/send_tts.py master "主人，晚安，做个好梦～"
 python -X utf8 tools/send_tts.py xi "小主人，球球在呢～" --proactive
 ```
 
-主动语音加 `--proactive`，占主动消息安全预算；用户明确要求的回复不加。Edge TTS 失败时降级文字，不要改用难听的备用音色。
+主动语音加 `--proactive`，占该接收者的主动消息安全预算；用户明确要求的回复不加。Edge TTS 失败时降级文字，不要改用难听的备用音色。
 
 ### 事件提醒
+
+只有用户明确要求提醒才创建，单纯分享未来安排或请代写通知不自动创建。
+先确认对象、具体日期和上午/下午，创建后核对真实 timer 记录再确认。
 
 ```bash
 python -X utf8 tools/add_reminder.py --owner master \
@@ -196,15 +215,16 @@ python -X utf8 tools/add_reminder.py --owner master \
 
 ### 随机关怀
 
-`care_scheduler.py` 每天 08:17 规划 0-2 次机会（55/32/13），时间随机在
-08:30-21:30，间隔至少 2 小时。每次机会只是“可以关心”，agent 判断有真实
-上下文才发，否则 `NO_REPLY`。主动消息共享 4 条/24h、间隔 5 分钟的安全预算。
+`care_scheduler.py` 按现有计划每天为 master 和 xi 各规划一次机会，时间随机在
+08:30-21:30，两个机会间隔至少 2 小时。晚启动时可能只剩一个或没有可用时段，
+不会补发已过期机会；已有当日计划不会重新抽取。每次只评估指定对象，有真实
+上下文才发，否则 `NO_REPLY`。每位接收者分别受本地自然日 4 条主动消息和
+至少 5 分钟间隔约束；跨午夜仍保留最小间隔，这不是滚动 24 小时额度。
 
 cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/24小时预算。
 示例配置改为 burst_limit=20、burst_window_secs=60，保留短时保护。
-这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。关怀机会默认
-0-2 次/天，每次最多 2 条；主动消息共享 4 条/24h、间隔 5 分钟的本地安全预算，
-在 iLink 的服务端限制下留出余量。
+这不是微信官方每日额度；遇到网关拒绝应记录错误并停止重试。每个入口每天
+最多一次关怀机会，每次最多 2 条（图片也计入），分别受本地自然日预算和间隔限制。
 主动消息优先用 `chat_burst.py --proactive`；iLink 服务端仍可能以 `ret=-2` 节流。
 
 ### 记忆
@@ -262,7 +282,7 @@ memory、config、日志或 token。
   `[rate_limit] max_messages = 0` in `config.toml`, or wait a minute.
 - **“send budget exhausted”** — cc-connect local send guard, including normal replies in v1.5.0.
   Configure each Weixin platform with `burst_limit=20` and `burst_window_secs=60`; do not re-login
-  the bot. Care opportunities default to 0-2/day; proactive messages share a 4/24h safety budget, and iLink may still throttle.
+  the bot. Each recipient has at most one care opportunity/day and a separate local-calendar-day proactive budget; iLink may still throttle.
 - **“no stored context_token”** — the recipient must message that bot first;
   WeChat does not allow a bot to start a conversation.
 - **表情只出现文字/完全没发** — 检查 `sticker_admin.py validate`、每日上限/冷却，以及

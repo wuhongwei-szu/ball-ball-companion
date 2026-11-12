@@ -14,6 +14,7 @@
 | `memory/IMPROVEMENTS.md` | Weekly self-improvement list (low-risk fixes; rule changes are proposals only) |
 | `memory/CARE_LOG.md` | Sent proactive messages, used by the weekly reflection |
 | `memory/companion.sqlite3` | Sourced/versioned `current_fact` records |
+| `config/core_memory.json` | Stable fact keys always injected for the current viewer (MemGPT-style core memory) |
 | `memory/sticker_usage.json` | Sticker send history and daily quotas |
 | `memory/recent_replies.md` | Last 20 assistant messages |
 | `memory/CONFLICTS.md` | Contradictions waiting for a human decision |
@@ -38,10 +39,11 @@
    applied directly; changes to persona, rules, reminders or send behavior are
    written as proposals for the human to approve.
 6. **Recall** — `companion_memory.recall()` returns a small viewer-first packet:
-   the current person's facts and shared facts come first; the other person's
-   facts/statements are only included when the current message explicitly
-   mentions them (or a shared "we/together" context). Relevant facts are
-   filtered by score and the packet excludes the current message's own source.
+   the current person's facts and shared facts come first; `config/core_memory.json`
+   lists stable keys that are always injected, while query-matched facts and
+   sources are ranked below them. The other person's facts/statements are only
+   included when the current message explicitly mentions them (or a shared
+   "we/together" context); the packet excludes the current message's own source.
 7. **Search** — for older details, `memory_search.py "keyword"` returns current
    facts plus labeled legacy evidence; MEMORY.md sections are attributed to the
    right person. If nothing matches, say so instead of guessing.

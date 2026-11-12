@@ -18,6 +18,7 @@
 | 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；主动消息共享 4 条/24h 安全预算 |
 | 长期记忆 | 原文捕获 → 助手回复回填 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
 | 当前事实 | `companion_memory.py` 的 `current_fact` 带来源/版本；检索按当前通道优先，跨人事实只在明确提到对方时注入 |
+| 核心记忆 | `config/core_memory.json` 常驻稳定偏好；每轮优先注入当前人的 active 版本，避免旧偏好被闲聊挤掉 |
 | 每周反思 | 每周日生成 `memory/WEEKLY.md`，评估主动关怀与待改进点；`CARE_LOG.md` 记录已发主动消息；`IMPROVEMENTS.md` 维护低风险自我改进清单 |
 | 微信纯文本 | `send_msg.py` / `chat_burst.py` 发送前清理 `**`、标题、反引号和代码围栏 |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |

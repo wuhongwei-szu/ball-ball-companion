@@ -167,6 +167,20 @@ def score(text, query):
     return result
 
 
+def _core_keys(viewer, root=ROOT):
+    """Stable facts always injected for this viewer (MemGPT-style core memory)."""
+    try:
+        data = json.loads((Path(root) / "config" / "core_memory.json").read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    keys = []
+    for subject in (viewer, "shared"):
+        values = data.get(subject, [])
+        if isinstance(values, list):
+            keys.extend(str(value) for value in values if isinstance(value, str) and value)
+    return keys
+
+
 def recall(db, viewer, query="", limit=10, exclude_source=None):
     """Return a small, attributable memory packet for one conversation.
 
@@ -186,6 +200,8 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
     rows = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
                           WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""", (viewer,)).fetchall()
     scored = [(score(f["key"] + " " + f["value"], q) if q else 0, f) for f in rows]
+    by_key = {f["key"]: f for _, f in scored if f["subject"] in (viewer, "shared")}
+    core_facts = [by_key[key] for key in _core_keys(viewer) if key in by_key]
 
     if q:
         matched = [
@@ -193,12 +209,11 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
             if sc > 0 and (f["subject"] in (viewer, "shared") or allow_other)
         ]
         if not matched:
-            # No fact matches: keep only a few recent viewer/shared facts as
-            # core memory rather than dumping every stored fact into a casual
-            # message. The rest stays available through memory_search.py.
-            core = [f for _, f in scored if f["subject"] in (viewer, "shared")]
-            core.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
-            matched = [(0, f) for f in core[:3]]
+            # No fact matches: keep recent viewer/shared facts as a fallback,
+            # but cap them so a casual message does not dump every fact.
+            recent = [f for _, f in scored if f["subject"] in (viewer, "shared")]
+            recent.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+            matched = [(0, f) for f in recent[:3]]
         else:
             # Single-character bigrams make short Chinese queries match many
             # unrelated facts. Keep the strong matches relative to the best
@@ -210,11 +225,25 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
             key=lambda item: (item[0], item[1]["subject"] == viewer, item[1]["at"], item[1]["id"]),
             reverse=True,
         )
-        facts = [f for _, f in matched[:limit]]
+        combined = []
+        seen = set()
+        for f in core_facts + [f for _, f in matched]:
+            if f["id"] in seen:
+                continue
+            seen.add(f["id"])
+            combined.append(f)
+        facts = combined[:limit]
     else:
-        core = [f for _, f in scored if f["subject"] in (viewer, "shared")]
-        core.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
-        facts = core[:limit]
+        recent = [f for _, f in scored if f["subject"] in (viewer, "shared")]
+        recent.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+        combined = []
+        seen = set()
+        for f in core_facts + recent[:3]:
+            if f["id"] in seen:
+                continue
+            seen.add(f["id"])
+            combined.append(f)
+        facts = combined[:limit]
 
     result = [{"kind": "current_fact", "subject": f["subject"], "key": f["key"],
                "value": f["value"], "version": f["id"], "speaker": f["speaker"],

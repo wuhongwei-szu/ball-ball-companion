@@ -44,6 +44,11 @@ if (Test-Path -LiteralPath $configExample) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Repo "config") | Out-Null
     Copy-Item -LiteralPath $configExample -Destination (Join-Path $Repo "config\openai_admin.env.example") -Force
 }
+$coreExample = Join-Path $Source "config\core_memory.example.json"
+if (Test-Path -LiteralPath $coreExample) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $Repo "config") | Out-Null
+    Copy-Item -LiteralPath $coreExample -Destination (Join-Path $Repo "config\core_memory.example.json") -Force
+}
 
 Push-Location $Repo
 try {

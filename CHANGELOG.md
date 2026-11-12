@@ -19,6 +19,10 @@
 - Add `whoami.py` and `view_session.py` so each bot knows its channel and
   session lookup no longer hard-codes s1/s2; add fast-ack guidance for tasks
   expected to take more than 15 seconds.
+- Add a small MemGPT-style core memory: `config/core_memory.json` lists stable
+  fact keys that are always injected for the current viewer; the query-matched
+  facts and sources remain ranked below the core, and the other person's private
+  facts are still excluded unless explicitly mentioned.
 - Add a WeChat plain-text sanitizer in `send_msg.py` / `chat_burst.py` and a
   `reminder_admin.py` lifecycle/GC tool. The sanitizer strips paired `**bold**`
   but keeps math such as `2**3` and Python dunders such as `__name__`.

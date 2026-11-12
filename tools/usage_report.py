@@ -224,8 +224,12 @@ def build_report():
         platform["credit"] = round(credit, 2)
         platform["budget"] = round(credit, 2)  # legacy cache key
         platform["remaining"] = round(credit - platform["cost"], 2)
-        platform["refresh_day"] = refresh_day
-        platform["refresh_note"] = refresh_note
+        if refresh_note:
+            platform["refresh_day"] = ""
+            platform["refresh_note"] = refresh_note
+        else:
+            platform["refresh_day"] = refresh_day
+            platform["refresh_note"] = ""
     session_key = cfg.get("OPENAI_SESSION_KEY", "")
     credits = fetch_credit_grants(session_key) if session_key else {"error": "未配置可选 OPENAI_SESSION_KEY"}
     report = {"chatgpt": chatgpt, "platform": platform, "credit_grants": credits}
@@ -250,7 +254,7 @@ def format_text(report):
     if "cost" in plat:
         refresh = ""
         if plat.get("refresh_day"):
-            refresh = "；额度刷新：每月%s日，具体以 Platform 为准" % plat["refresh_day"]
+            refresh = "；额度刷新：预计每月%s日，具体以 Platform 为准" % plat["refresh_day"]
         elif plat.get("refresh_note"):
             refresh = "；额度刷新：%s" % plat["refresh_note"]
         lines.append("Platform API 本月：%s %.2f / Pro 额度 %.2f，预计剩余 %.2f（按 Pro 额度折算%s；%s—%s）"

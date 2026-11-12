@@ -42,6 +42,7 @@ except Exception:
 CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 ORG_COSTS_URL = "https://api.openai.com/v1/organization/costs"
 CREDIT_GRANTS_URL = "https://api.openai.com/dashboard/billing/credit_grants"
+CACHE_PATH = Path(ROOT) / "memory" / "platform_usage.json"
 
 
 def _auth_paths():
@@ -171,6 +172,33 @@ def fetch_credit_grants(session_key):
     return {k: payload.get(k) for k in ("total_granted", "total_used", "total_available")}
 
 
+def _write_cache(report):
+    """Write the small cache read by cc-connect's /usage line."""
+    platform = report.get("platform", {})
+    credits = report.get("credit_grants", {}) or {}
+    available = credits.get("total_available")
+    payload = {
+        "cost": platform.get("cost"),
+        "budget": platform.get("budget"),
+        "remaining": platform.get("remaining"),
+        "currency": platform.get("currency", "usd"),
+        "period_start": platform.get("period_start"),
+        "period_end": platform.get("period_end"),
+        "credits_available": "" if available is None else str(available),
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "error": platform.get("error", ""),
+    }
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if c is not None and hasattr(c, "save_json_atomic"):
+            c.save_json_atomic(str(CACHE_PATH), payload)
+        else:
+            CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                                  encoding="utf-8")
+    except Exception as exc:
+        print(f"[usage] cache write failed: {exc}", file=sys.stderr)
+
+
 def build_report():
     cfg = _config()
     chatgpt = fetch_chatgpt_usage()
@@ -187,7 +215,9 @@ def build_report():
         platform["remaining"] = round(budget - platform["cost"], 2)
     session_key = cfg.get("OPENAI_SESSION_KEY", "")
     credits = fetch_credit_grants(session_key) if session_key else {"error": "未配置可选 OPENAI_SESSION_KEY"}
-    return {"chatgpt": chatgpt, "platform": platform, "credit_grants": credits}
+    report = {"chatgpt": chatgpt, "platform": platform, "credit_grants": credits}
+    _write_cache(report)
+    return report
 
 
 def format_text(report):

@@ -185,7 +185,7 @@ def _write_cache(report):
         "period_start": platform.get("period_start"),
         "period_end": platform.get("period_end"),
         "credits_available": "" if available is None else str(available),
-        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "updated_at": datetime.datetime.now().astimezone().strftime("%m-%d %H:%M"),
         "error": platform.get("error", ""),
     }
     try:

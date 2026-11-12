@@ -37,7 +37,7 @@ PLAN_POLICY = "per_recipient_v1"
 LEGACY_PROMPT = """【上下文关怀】现在是 {when_text}。今天这是第 {index}/{total} 次随机关怀机会（本地主动消息上限为每位接收者每个本地自然日 4 条、间隔至少 5 分钟；这次最多 2 条）。
 请阅读 {work_dir}/PERSONA.md、memory/MEMORY.md、memory/STATE.md、memory/EVENTS.md、memory/THREADS.md 和今天/昨天的原文，判断有没有值得主动关心{master_label}或{partner_label}的事（累了、忙、考试/体测/面试、情绪、久未联系、约定临近、THREADS 里的未完话题）。
 如果最近两次主动消息对方都没回，就只回复 NO_REPLY，不要继续发。
-如果有，用 python -X utf8 {work_dir}/tools/chat_burst.py master|xi --proactive [--sticker <分类>] "第一句" "第二句" 发 1-2 条；按对象选择 master/xi。表情最多 1 张/天，没有合适的分类就纯文字；如果对方上下文过期就跳过，不要重试、不要报错。
+如果有，用 python -X utf8 {work_dir}/tools/chat_burst.py master|xi --proactive [--sticker <分类>] "第一句" "第二句" 发 1-2 条；按对象选择 master/xi。表情每次最多 1 张，遵守全局表情限额；没有合适的分类就纯文字；如果对方上下文过期就跳过，不要重试、不要报错。
 没有真实事由就只回复 NO_REPLY，不要为了发而发。现在如果不在 08:30-21:30，不要发。不要提系统任务。"""
 
 

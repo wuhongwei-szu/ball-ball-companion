@@ -28,7 +28,6 @@ DEFAULTS = {
     "session_file": "",
     "master_session_id": "s1",
     "xi_session_id": "s2",
-    "xi_platform_index": 2,
     "weixin_api_url": "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
     "weixin_cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
     "sticker_dir": os.path.join(ROOT, "assets", "stickers"),

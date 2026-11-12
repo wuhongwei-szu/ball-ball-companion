@@ -14,12 +14,15 @@ It creates a `timer add --at ...` job targeting the owner's session. At the
 due time cc-connect injects a prompt into a fresh side session; the agent
 reads `PERSONA.md` / `MEMORY.md` / `STATE.md` / `THREADS.md`, writes a
 personalized reminder via `chat_burst.py --proactive`, and ends with
-`NO_REPLY`. A sticker is optional; it counts toward the “1 proactive sticker
-per day” cap and should be omitted for urgent or serious reminders.
+`NO_REPLY`. A sticker is optional; at most one per proactive burst, and it
+still counts toward the global sticker daily cap/cooldown. Omit it for urgent
+or serious reminders.
 
 - `--owner master|xi|both`
 - Rejects times in 23:00-07:00 unless `--allow-night`
 - Deduplicates by owner/date/time/title in `memory/reminders.json`
+- `reminder_admin.py --list` shows status; `--gc` marks past scheduled entries
+  expired, and the daily `b03857e6` cron runs it automatically
 - Requires cc-connect to be running (it uses the local API socket)
 
 ## Random care

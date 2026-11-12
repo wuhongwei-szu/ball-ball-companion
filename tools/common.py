@@ -377,7 +377,10 @@ def sanitize_wechat(text):
     if not isinstance(text, str) or not text:
         return text
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
-    text = text.replace("**", "").replace("__", "")
+    # Strip paired **bold** only; keep math like 2**3 and Python dunders.
+    # We deliberately leave __...__ alone because it is indistinguishable from
+    # Python names such as __name__.
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.S)
     text = re.sub(r"(?m)^\s*```[^\n]*$", "", text)
     text = text.replace("`", "")
     return text

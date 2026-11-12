@@ -85,7 +85,10 @@ def auto_tags(entries):
                 wanted.extend(tags)
         if not wanted:
             continue
-        current = data.setdefault(entry["id"], [])
+        current = data.get(entry["id"])
+        if not isinstance(current, list):
+            current = []
+            data[entry["id"]] = current
         for tag in normalize(wanted):
             if tag not in current:
                 current.append(tag)

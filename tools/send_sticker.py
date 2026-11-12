@@ -53,6 +53,15 @@ def load_usage():
     return data if isinstance(data, dict) else {}
 
 
+def load_extra_tags():
+    """Semantic tags added in sticker_tags.json (kept separate from scan)."""
+    data = c.load_json(os.path.join(c.STICKER_DIR, "sticker_tags.json"), {})
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): [str(tag) for tag in value] for key, value in data.items()
+            if isinstance(value, list)}
+
+
 def target_state(usage, target):
     state = usage.get(target)
     if not isinstance(state, dict):
@@ -142,6 +151,11 @@ def _select_candidate(manifest, category, style, sticker_id, state, target, pref
         styled = [e for e in pool if e.get("style") == style]
         if styled:
             pool = styled
+    elif base.get("category") == "comfort":
+        # Comfort deliberately mixes cute/generic art with the big-fish
+        # stickers; do not narrow to one style or the single silly entry
+        # would always win.
+        pass
     else:
         for preferred in DEFAULT_STYLES.get(target, ()):
             styled = [e for e in pool if e.get("style") == preferred]
@@ -151,8 +165,10 @@ def _select_candidate(manifest, category, style, sticker_id, state, target, pref
     if prefer:
         keywords = [k.strip().lower() for k in re.split(r"[,，\s]+", prefer) if k.strip()]
         matched = []
+        extra = load_extra_tags()
         for entry in pool:
-            haystack = (entry.get("label", "") + " " + " ".join(entry.get("tags", []))).lower()
+            tags = list(entry.get("tags", [])) + extra.get(entry.get("id", ""), [])
+            haystack = (entry.get("label", "") + " " + " ".join(tags)).lower()
             if any(keyword in haystack for keyword in keywords):
                 matched.append(entry)
         if matched:

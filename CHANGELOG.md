@@ -1,3 +1,25 @@
+## 2026-11-12 - Memory evolution, comfort stickers and channel identity
+
+- Add viewer-first, relevance-filtered memory retrieval; the current person's
+  and shared facts are preferred, and cross-person facts are injected only when
+  the message explicitly mentions the other person. `memory_search.py` now
+  attributes MEMORY.md sections by person.
+- Add `capture_review.py` to backfill the assistant's own direct replies into
+  raw transcripts; the daily consolidation now runs it before reading raw.
+- Add `companion_memory.py learn --curator` for the silent daily consolidation,
+  plus sourced/versioned `current_fact` writes and a small `memory_eval.py`
+  regression set (private deployment-specific cases are not published).
+- Add a weekly reflection job (`WEEKLY.md`, `CARE_LOG.md`) that reviews
+  proactive-care quality and updates open topics/state.
+- Add a `comfort` sticker category with semantic overlay
+  `assets/stickers/sticker_tags.json`, `sticker_tag.py` (auto/set/list), and
+  comfort-aware selection that does not narrow to one style.
+- Add `whoami.py` and `view_session.py` so each bot knows its channel and
+  session lookup no longer hard-codes s1/s2; add fast-ack guidance for tasks
+  expected to take more than 15 seconds.
+- Add a WeChat plain-text sanitizer in `send_msg.py` / `chat_burst.py` and a
+  `reminder_admin.py` lifecycle/GC tool.
+
 ## 2026-11-07 - Sync deployed capture and midnight interval repairs
 
 - Recognize generated care/reminder prompts during conservative capture.

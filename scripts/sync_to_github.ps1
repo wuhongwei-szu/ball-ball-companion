@@ -18,9 +18,13 @@ New-Item -ItemType Directory -Force -Path $toolsDst | Out-Null
 
 $names = @(
     "common.py", "send_msg.py", "send_xi.py", "send_sticker.py",
-    "send_tts.py", "chat_burst.py", "sticker_admin.py", "memory_search.py",
-    "add_reminder.py", "care_scheduler.py", "capture_transcripts.py",
-    "healthcheck.py", "backup.ps1", "setup_tasks.ps1"
+    "send_tts.py", "send_voice.py", "chat_burst.py", "sticker_admin.py",
+    "sticker_tag.py", "sticker_feedback.py", "sticker_review.py",
+    "memory_search.py", "companion_memory.py", "capture_runtime.py",
+    "capture_transcripts.py", "capture_review.py", "whoami.py",
+    "view_session.py", "add_reminder.py", "reminder_admin.py",
+    "care_scheduler.py", "care_timer_state.py", "reset_agent_threads.py",
+    "learn_sticker.py", "healthcheck.py", "backup.ps1", "setup_tasks.ps1"
 )
 foreach ($name in $names) {
     $src = Join-Path $toolsSrc $name

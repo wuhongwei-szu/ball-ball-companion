@@ -6,7 +6,7 @@
   sessions, cron jobs, one-shot timers, and platform routing.
 - **Codex CLI** — the local agent. It reads `AGENTS.md` / `PERSONA.md` and uses
   the tools in `tools/`.
-- **OpenAI API** (`gpt-6-luna` by default) — the model provider.
+- **OpenAI API** (model configured in `.codex/config.toml`; example `gpt-6.1-sol`) — the model provider.
 - **Python/PowerShell tools** — memory capture, reminders, sending, backups,
   health checks.
 

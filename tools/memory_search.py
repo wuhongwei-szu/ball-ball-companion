@@ -18,10 +18,29 @@ def legacy(query, viewer, root=memory.ROOT, limit=4):
             paths.extend((root / "memory" / kind / sid).glob("*.md"))
     found = []
     for path in paths:
-        subject = "master" if "s1" in path.parts else "xi" if "s2" in path.parts else "shared"
         text = path.read_text(encoding="utf-8", errors="replace")
-        blocks = re.split(r"(?m)^##\s+", text) if "raw" in path.parts else text.splitlines()
-        for block in blocks:
+        entries = []
+        if path.name == "MEMORY.md":
+            # MEMORY.md is a shared document with per-person sections; label
+            # each line with the section it came from instead of calling the
+            # whole file "shared".
+            section = "shared"
+            for line in text.splitlines():
+                if line.startswith("## "):
+                    title = line[3:].strip()
+                    if title.startswith("主人"):
+                        section = "master"
+                    elif title.startswith("小主人"):
+                        section = "xi"
+                    else:
+                        section = "shared"
+                    continue
+                entries.append((section, line))
+        else:
+            subject = "master" if "s1" in path.parts else "xi" if "s2" in path.parts else "shared"
+            blocks = re.split(r"(?m)^##\s+", text) if "raw" in path.parts else text.splitlines()
+            entries = [(subject, block) for block in blocks]
+        for subject, block in entries:
             block = re.sub(r"\s+", " ", block).strip()
             if not block or block.startswith(("#", ">")) or memory.SECRET.search(block):
                 continue
@@ -43,7 +62,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="共同记忆检索，保留人物归属与来源")
     parser.add_argument("query")
     parser.add_argument("--limit", type=int, default=5)
-    parser.add_argument("--max-chars", type=int, default=2000)
+    parser.add_argument("--max-chars", type=int, default=3000)
     args = parser.parse_args(argv)
     try:
         who = memory.env_caller(memory.config())

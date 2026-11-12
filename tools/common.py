@@ -182,6 +182,7 @@ CARE_PLAN_FILE = os.path.join(MEMORY_DIR, ".care_plan.json")
 CAPTURE_STATE_FILE = os.path.join(MEMORY_DIR, ".capture_state.json")
 STICKER_USAGE_FILE = os.path.join(MEMORY_DIR, "sticker_usage.json")
 OUTBOUND_STATE_FILE = os.path.join(MEMORY_DIR, "outbound_state.json")
+CARE_LOG_FILE = os.path.join(MEMORY_DIR, "CARE_LOG.md")
 THREADS_FILE = os.path.join(MEMORY_DIR, "THREADS.md")
 
 RECENT_HEADER = (
@@ -346,6 +347,17 @@ def record_outbound(target, proactive=False, count=1):
     save_json_atomic(OUTBOUND_STATE_FILE, state)
 
 
+def sanitize_wechat(text):
+    """Remove Markdown markers that WeChat would show as literal characters."""
+    if not isinstance(text, str) or not text:
+        return text
+    text = re.sub(r"(?m)^#{1,6}\s+", "", text)
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"(?m)^\s*```[^\n]*$", "", text)
+    text = text.replace("`", "")
+    return text
+
+
 def append_raw(sid, text, role="assistant", ts=None):
     """Append one message to memory/raw/{sid}/YYYY-MM-DD.md."""
     text = redact(text)
@@ -384,6 +396,25 @@ def append_recent(text, ts=None):
     os.makedirs(MEMORY_DIR, exist_ok=True)
     with open(RECENT_FILE, "w", encoding="utf-8") as f:
         f.write(RECENT_HEADER + "\n" + "\n".join(items) + "\n")
+
+
+def append_care_log(target, text, sticker=""):
+    """Record a proactive message locally for the weekly reflection."""
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+    snippet = " ".join(str(text).split())[:100]
+    line = f"- [{datetime.datetime.now().strftime('%m-%d %H:%M')}] {target} | {snippet}"
+    if sticker:
+        line += f" | sticker={sticker}"
+    header = "# 主动关怀记录\n\n> 只记录已发送的主动消息，供每周反思使用；不是聊天记录。\n"
+    try:
+        with open(CARE_LOG_FILE, encoding="utf-8") as f:
+            existing = f.read()
+    except FileNotFoundError:
+        existing = header
+    if header not in existing:
+        existing = header + "\n" + existing
+    with open(CARE_LOG_FILE, "w", encoding="utf-8") as f:
+        f.write(existing.rstrip() + "\n" + line + "\n")
 
 
 def require(value, name):

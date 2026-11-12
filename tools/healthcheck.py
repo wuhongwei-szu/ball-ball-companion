@@ -45,7 +45,9 @@ def report_capture_health(jobs):
           + (f" reason={health['reason']}" if health["reason"] else ""))
     print(f"[{'WARN' if health['coverage_status'] != 'no_recorded_gaps' else 'OK'}] "
           f"archive coverage: {health['coverage_status']} "
-          f"review_pending={health['review_pending']} review_boundaries={health['review_boundaries']}")
+          f"review_pending={health['review_pending']} "
+          f"(active={health.get('review_pending_active')}, legacy={health.get('review_pending_legacy')}) "
+          f"review_boundaries={health['review_boundaries']}")
     return healthy
 
 

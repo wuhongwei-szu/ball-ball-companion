@@ -2,19 +2,24 @@
 
 一个可自托管的微信 AI 陪伴机器人：**两个微信 bot、共享人格与长期记忆、自然多气泡、表情包、一次性提醒、随机关怀**。
 
-项目由 cc-connect 1.5.x 桥接微信，Codex CLI 作为本地 agent，默认使用 `gpt-6-luna`。
+项目由 cc-connect 1.5.x 桥接微信，Codex CLI 作为本地 agent，模型可配置（示例部署使用 `gpt-6.1-sol`，reasoning `low`）。
 仓库只包含通用代码、模板和文档；**不包含任何 token、openid、API key、聊天记忆或私人配置**。
 
 ## 特性
 
 | 能力 | 说明 |
 |---|---|
-| 双 bot 共享人格 | 两个微信 bot 共用同一份 persona 与长期记忆，各自保留对话笔记 |
+| 双 bot 共享人格 | 两个微信 bot 共用同一份 persona 与长期记忆，各自保留对话笔记；`whoami.py` 明确当前通道 |
+| 会话查询 | `view_session.py` 按 openid 找最近活跃会话，不再硬编码 s1/s2 |
 | 多气泡聊天 | 用 `chat_burst.py` 发 1-3 条短消息并带自然停顿，最后用 `NO_REPLY` 抑制多余回复 |
-| 表情包 | 本地分类图库；脚本按概率、冷却、每日上限决定发不发；图片算独立出站消息 |
+| 表情包 | 本地分类图库；`comfort` 安慰分类 + `sticker_tags.json` 语义标签；脚本按概率、冷却、每日上限决定发不发 |
 | 事件提醒 | 说“下周二体测”，确认日期后用 cc-connect 内置 `timer` 到点提醒 |
+| 提醒维护 | `reminder_admin.py` 查询、标记、清理过期提醒状态 |
 | 随机关怀 | 每天随机 0-2 次机会（55/32/13），时间在 08:30-21:30，23:00-07:00 安静；主动消息共享 4 条/24h 安全预算 |
-| 长期记忆 | 原文捕获 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
+| 长期记忆 | 原文捕获 → 助手回复回填 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
+| 当前事实 | `companion_memory.py` 的 `current_fact` 带来源/版本；检索按当前通道优先，跨人事实只在明确提到对方时注入 |
+| 每周反思 | 每周日生成 `memory/WEEKLY.md`，评估主动关怀与待改进点；`CARE_LOG.md` 记录已发主动消息 |
+| 微信纯文本 | `send_msg.py` / `chat_burst.py` 发送前清理 `**`、标题、反引号和代码围栏 |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
 | 运维 | 隐藏自启、5 分钟看门狗、每日备份、日志轮转、只读健康检查 |
@@ -23,9 +28,9 @@
 
 ```text
 WeChat ilink bot A ─┐
-                    ├─ cc-connect 1.5.x ─ Codex CLI ─ OpenAI (gpt-6-luna)
+                    ├─ cc-connect 1.5.x ─ Codex CLI ─ OpenAI (configurable)
 WeChat ilink bot B ─┘         │
-                              ├─ crons: 每日要闻 / 记忆整理 / 原文捕获 / 关怀规划
+                              ├─ crons: 记忆整理 / 原文回填 / 提醒清理 / 每周反思 / 关怀规划
                               ├─ timers: 一次性提醒、随机关怀
                               └─ webhook / management API (optional)
 
@@ -37,25 +42,35 @@ work_dir/
 │   ├── STATE.md               # 心情/精力/关系温度/小日常
 │   ├── EVENTS.md              # 重要日子与约定
 │   ├── THREADS.md             # 未完话题与约定（主动关心素材）
+│   ├── WEEKLY.md              # 每周反思（每周任务生成）
+│   ├── CARE_LOG.md            # 已发送的主动关怀记录
+│   ├── companion.sqlite3      # 带来源/版本的 current_fact
 │   ├── sticker_usage.json     # 表情发送历史/每日额度
-│   ├── raw/s1|s2/             # 对话原文（自动脱敏）
+│   ├── raw/s1|s2/             # 对话原文（自动脱敏，含助手回复回填）
 │   ├── notes/s1|s2/           # 每日笔记
 │   ├── reminders.json         # 已创建提醒索引
 │   ├── recent_replies.md      # 最近 20 条回复
 │   └── .care_plan.json        # 当天随机关怀计划
 ├── assets/stickers/           # 本地表情库（不入公开仓库）
 └── tools/
-    ├── common.py              # 配置加载与会话/token 运行时推导
+    ├── common.py              # 配置加载、会话/token 推导、微信纯文本清洗
+    ├── whoami.py              # 输出当前通道 master/xi
+    ├── view_session.py        # 按 openid 查看最近活跃会话
     ├── chat_burst.py          # 统一的多气泡 + 表情发送入口
     ├── send_sticker.py        # 选图/额度/冷却 + 发送一张表情
-    ├── send_tts.py            # Edge TTS 生成晓晓语音 MP3 并以文件发送
     ├── sticker_admin.py       # 表情库 scan/validate/list/catalog/import
+    ├── sticker_tag.py         # 表情语义标签维护（--auto/--set/--list）
+    ├── send_tts.py            # Edge TTS 生成晓晓语音 MP3 并以文件发送
     ├── memory_search.py       # 本地记忆关键词检索
+    ├── companion_memory.py    # 有来源的共同记忆（bridge/search/learn）
     ├── send_msg.py            # 单条发送 + 写原文
     ├── send_xi.py             # 直连第二个 bot 的 ilink API（文本/图片）
     ├── add_reminder.py        # 创建一次性提醒（复用 cc-connect timer）
-    ├── care_scheduler.py      # 每天规划 0-3 次随机关怀
+    ├── reminder_admin.py      # 提醒查询、标记和过期清理
+    ├── care_scheduler.py      # 每天规划 0-2 次随机关怀
     ├── capture_transcripts.py # 捕获新对话
+    ├── capture_runtime.py     # 保守捕获/回填状态
+    ├── capture_review.py      # 把助手直接回复回填到 raw
     ├── healthcheck.py
     ├── backup.ps1
     └── setup_tasks.ps1
@@ -69,7 +84,7 @@ work_dir/
 - cc-connect **1.5.x**（示例使用 1.5.0）
 - Codex CLI（桌面版自带或 `npm install -g @openai/codex`）
 - 两个微信 ilink bot（cc-connect 的 `weixin` 平台）
-- OpenAI API key（默认模型 `gpt-6-luna`）
+- OpenAI API key（模型在 `.codex/config.toml` 配置，示例 `gpt-6.1-sol`）
 
 ## 快速开始
 
@@ -209,10 +224,13 @@ cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/2
 
 ### 记忆
 
-`capture_transcripts.py` 每 5 分钟捕获新消息到 `memory/raw/`；每晚 03:17 的
-`memcons01` 整理到 `MEMORY.md` / `EVENTS.md` / `STATE.md` / `THREADS.md`。
-需要旧细节时用 `memory_search.py "关键词"` 检索，找不到就如实说。
-所有写入前自动脱敏。详见 [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)。
+`capture_transcripts.py` 每 5 分钟捕获新消息到 `memory/raw/`；`capture_review.py`
+把助手自己的直接回复回填，避免整理时只看用户一侧。每晚 03:17 的 `memcons01`
+整理到 `MEMORY.md` / `EVENTS.md` / `STATE.md` / `THREADS.md`，并用
+`companion_memory.py learn --curator` 写入带来源的 `current_fact`。每周日 03:30
+生成 `memory/WEEKLY.md` 并更新未完话题。需要旧细节时用 `memory_search.py "关键词"`
+检索；跨人事实只在当前消息明确提到对方时注入。所有写入前自动脱敏。
+详见 [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)。
 
 ## 隐私与安全
 
@@ -252,7 +270,7 @@ memory、config、日志或 token。
 - Windows 11
 - cc-connect 1.5.0
 - Codex CLI 0.166 (MSIX desktop)
-- OpenAI `gpt-6-luna`
+- OpenAI（模型可配置，示例 `gpt-6.1-sol`）
 - 两个微信 ilink bot
 
 ## Troubleshooting

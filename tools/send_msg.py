@@ -18,6 +18,7 @@ import common as c
 
 def send_master(text):
     c.require(c.MASTER_SESSION, "master_session（从 session 文件推导）")
+    text = c.sanitize_wechat(text)
     result = c.run_cc([
         "send", "-p", c.PROJECT, "--session", c.MASTER_SESSION, "-m", text,
     ])
@@ -36,6 +37,7 @@ def send_master(text):
 
 def send_xi(text, relay=False):
     c.require(c.XI_SESSION, "xi_session（从 session 文件推导）")
+    text = c.sanitize_wechat(text)
     # Select one transport before sending. A nonzero/unknown cc-connect result
     # may follow a successful send, so never retry it through direct iLink.
     allow_cc = c.current_target() == "xi" or (

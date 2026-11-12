@@ -80,6 +80,16 @@ def main():
     send_sticker_flag = bool(args.sticker) and random.random() < probability
     if args.sticker and not send_sticker_flag:
         print(f"[sticker] 概率未命中（p={probability:.2f}），这次只发文字")
+    if send_sticker_flag:
+        # Validate the category/style before sending text, so an invalid
+        # category cannot send the text and then abort with an error.
+        try:
+            send_sticker.choose(
+                send_sticker.load_manifest(), args.sticker, args.style
+            )
+        except SystemExit as exc:
+            print(f"[sticker] {exc}；本次只发文字")
+            send_sticker_flag = False
 
     if args.proactive and send_sticker_flag and len(messages) > 1:
         # An optional picture must not displace a second text bubble that may
@@ -142,6 +152,9 @@ def main():
             print(f"[chat] 第 {index} 条文字发送失败，停止后续发送（已发送 {index - 1} 条）")
             return code
         c.record_outbound(args.target, proactive=args.proactive)
+
+    if args.proactive and messages:
+        c.append_care_log(args.target, messages[0], args.sticker if send_sticker_flag else "")
 
     if send_sticker_flag:
         code = send_sticker.send_one(

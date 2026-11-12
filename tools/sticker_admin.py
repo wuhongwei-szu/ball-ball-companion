@@ -49,6 +49,7 @@ CATEGORY_DESCRIPTIONS = {
     "sleep": "困倦、晚安、休息",
     "tired": "疲惫、摆烂、没精神",
     "affection": "喜欢、亲昵、贴贴、安慰、感谢",
+    "comfort": "安慰、抱抱、贴贴、摸头、合十、击掌、拍拍",
     "food": "吃饭、零食、馋、投喂",
     "greeting": "早安、晚安、打招呼、欢迎",
     "work": "工作、加班、忙碌、摸鱼",
@@ -330,9 +331,10 @@ def write_catalog(manifest=None):
         n = counts.get(key, 0)
         if n:
             lines.append(f"- **{key}**（{n} 张）：{desc}")
+    styles = sorted({entry.get("style", "") for entry in manifest["stickers"] if entry.get("style")})
     lines += [
         "",
-        "风格：cat / pig / anime / generic / text / silly",
+        "风格：" + " / ".join(styles),
         "",
         "使用：`python -X utf8 tools/chat_burst.py master|xi --sticker <分类> ...`",
         "表情由脚本按概率、冷却和每日上限决定发不发；无合适候选时不发。",

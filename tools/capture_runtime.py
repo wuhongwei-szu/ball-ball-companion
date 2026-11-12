@@ -236,6 +236,15 @@ def review_count(state):
                for entry in channel["sessions"].values() for item in entry["review"])
 
 
+def review_count_active(state):
+    total = 0
+    for channel in state["channels"].values():
+        entry = channel.get("sessions", {}).get(channel.get("active"))
+        if isinstance(entry, dict):
+            total += sum(item["end"] - item["start"] for item in entry.get("review", []))
+    return total
+
+
 def is_synthetic_prompt(text):
     """Retain legacy filtering and recognize the generated care/reminder templates."""
     if any(marker in text for marker in (
@@ -360,6 +369,7 @@ def capture_health(state_path, job, now=None):
     """
     result = {"capture_status": "blocked", "reason": "state_unavailable",
               "coverage_status": "unknown", "review_pending": None,
+              "review_pending_active": None, "review_pending_legacy": None,
               "review_boundaries": None}
     try:
         state = read_json(state_path)
@@ -367,9 +377,12 @@ def capture_health(state_path, job, now=None):
     except CaptureError:
         return result
     pending = review_count(state)
+    active_pending = review_count_active(state)
     flags = len(state["review_flags"])
     result.update(coverage_status="review_required" if pending or flags else "no_recorded_gaps",
-                  review_pending=pending, review_boundaries=flags)
+                  review_pending=pending, review_pending_active=active_pending,
+                  review_pending_legacy=max(0, pending - active_pending),
+                  review_boundaries=flags)
     if any(entry["pending"] is not None for channel in state["channels"].values()
            for entry in channel["sessions"].values()):
         result["reason"] = "append_outcome_uncertain"

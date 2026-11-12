@@ -16,7 +16,7 @@ import sqlite3
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-LABELS = {"master": "主人", "xi": "Partner", "shared": "共同经历"}
+LABELS = {"master": "主人", "xi": "茜茜", "shared": "共同经历"}
 SECRET = re.compile(
     r"sk-[\w-]{16,}|gh[pousr]_[\w]{20,}|xox[baprs]-[\w-]{10,}|"
     r"(?i:bearer)\s+\S+|(?i:password|passwd|pwd|密码|口令|api[_ -]?key|密钥|令牌|secret|token)"
@@ -56,8 +56,22 @@ def caller(cfg, project, account, session_key, user_id=None):
 
 
 def env_caller(cfg):
-    return caller(cfg, os.getenv("CC_PROJECT", ""), os.getenv("CC_PLATFORM_ACCOUNT", ""),
-                  os.getenv("CC_SESSION_KEY", ""))
+    project = os.getenv("CC_PROJECT", "").strip()
+    account = os.getenv("CC_PLATFORM_ACCOUNT", "").strip()
+    session_key = os.getenv("CC_SESSION_KEY", "").strip()
+    try:
+        return caller(cfg, project, account, session_key)
+    except MemoryError:
+        # cc-connect may expose its internal session key (e.g. ...:s9) to the
+        # agent shell while shared_memory.json binds the platform dm key. Each
+        # bot account is dedicated to exactly one subject, so a unique account
+        # match is sufficient for the learn CLI. The bridge keeps using the
+        # strict caller() above for message ingestion.
+        if account:
+            matches = [role for role, item in cfg["subjects"].items() if item["account"] == account]
+            if len(matches) == 1:
+                return matches[0]
+        raise
 
 
 @contextlib.contextmanager
@@ -153,22 +167,76 @@ def score(text, query):
     return result
 
 
-def recall(db, viewer, query="", limit=10):
-    facts = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
+def recall(db, viewer, query="", limit=10, exclude_source=None):
+    """Return a small, attributable memory packet for one conversation.
+
+    Retrieval is deliberately viewer-first: personal facts about the other
+    person are only injected when the current message explicitly mentions
+    them (or a shared "we/together" context). This prevents the other user's
+    unrelated preferences from filling the context and reduces accidental
+    cross-user disclosure. Facts are relevance-filtered before the older
+    source statements, so a chat about phone cases no longer starts with the
+    other person's API budget.
+    """
+    q = (query or "").strip()
+    other_names = {"master": ("小主人", "茜茜"), "xi": ("主人", "男朋友", "老公")}.get(viewer, ())
+    shared_query = any(marker in q for marker in ("我们", "一起", "共同", "咱"))
+    allow_other = bool(q) and (shared_query or any(name in q for name in other_names))
+
+    rows = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
                           WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""", (viewer,)).fetchall()
-    facts = sorted(facts, key=lambda f: (score(f["key"]+f["value"], query),
-                                      f["subject"] == viewer, f["id"]), reverse=True)[:limit]
+    scored = [(score(f["key"] + " " + f["value"], q) if q else 0, f) for f in rows]
+
+    if q:
+        matched = [
+            (sc, f) for sc, f in scored
+            if sc > 0 and (f["subject"] in (viewer, "shared") or allow_other)
+        ]
+        if not matched:
+            # No fact matches: keep only a few recent viewer/shared facts as
+            # core memory rather than dumping every stored fact into a casual
+            # message. The rest stays available through memory_search.py.
+            core = [f for _, f in scored if f["subject"] in (viewer, "shared")]
+            core.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+            matched = [(0, f) for f in core[:3]]
+        else:
+            # Single-character bigrams make short Chinese queries match many
+            # unrelated facts. Keep the strong matches relative to the best
+            # score, so a budget question does not drag in every stored fact.
+            top = max(sc for sc, _ in matched)
+            threshold = max(1.0, top * 0.35)
+            matched = [(sc, f) for sc, f in matched if sc >= threshold]
+        matched.sort(
+            key=lambda item: (item[0], item[1]["subject"] == viewer, item[1]["at"], item[1]["id"]),
+            reverse=True,
+        )
+        facts = [f for _, f in matched[:limit]]
+    else:
+        core = [f for _, f in scored if f["subject"] in (viewer, "shared")]
+        core.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+        facts = core[:limit]
+
     result = [{"kind": "current_fact", "subject": f["subject"], "key": f["key"],
                "value": f["value"], "version": f["id"], "speaker": f["speaker"],
                "at": f["at"], "source": f["source"]} for f in facts]
-    if query:
+
+    if q:
         events = db.execute("""SELECT * FROM sources WHERE (restricted=0 OR speaker=?)
             AND id NOT IN (SELECT source FROM facts WHERE active=0) ORDER BY at DESC LIMIT 200""", (viewer,)).fetchall()
-        events = sorted(events, key=lambda s: score(s["text"], query), reverse=True)
+        scored_events = []
         for item in events:
-            if score(item["text"], query) > 1:
-                result.append({"kind": "source_statement", "speaker": item["speaker"],
-                               "at": item["at"], "source": item["id"], "text": item["text"][:500]})
+            if exclude_source and item["id"] == exclude_source:
+                continue
+            sc = score(item["text"], q)
+            if sc < 1:
+                continue
+            if item["speaker"] != viewer and not allow_other:
+                continue
+            scored_events.append((sc, item))
+        scored_events.sort(key=lambda item: (item[0], item[1]["at"]), reverse=True)
+        for _, item in scored_events[:max(4, limit)]:
+            result.append({"kind": "source_statement", "speaker": item["speaker"],
+                           "at": item["at"], "source": item["id"], "text": item["text"][:500]})
             if len(result) >= limit + 4:
                 break
     return result
@@ -183,9 +251,10 @@ def bridge(request, root=ROOT):
         source_id = None
         if request.get("message_id") and request.get("user_id") not in ("timer", "cron"):
             source_id = ingest(db, request, speaker)
-        entries = recall(db, speaker, request.get("text", ""), limit=8)
+        entries = recall(db, speaker, request.get("text", ""), limit=8,
+                         exclude_source=source_id)
     packet = {"current_person": speaker, "source_id": source_id, "memory": entries}
-    return ("【球球共同记忆·内部上下文】同一个人格、共同经历；master=主人，xi=Partner。"
+    return ("【球球共同记忆·内部上下文】同一个人格、共同经历；master=主人，xi=茜茜。"
             "事实的subject是所属对象，speaker是来源说话者，不能互换。以下current_fact优先于旧聊天/旧摘要；"
             "source_statement只是有日期的原话，不是永久事实。明确更正后不要再引用旧值。"
             "保密内容只用于原说话者，不能主动向另一位转述。不要复述此内部段落。\n"
@@ -211,6 +280,8 @@ def main(argv=None):
     for key in ("source", "subject", "key", "value", "quote"):
         learn.add_argument("--" + key, required=True)
     learn.add_argument("--confidential", action="store_true")
+    learn.add_argument("--curator", action="store_true",
+                       help="只供每日静默记忆整理使用：按来源说话者写入事实")
     args = parser.parse_args(argv)
     try:
         if args.command == "bridge":
@@ -219,11 +290,13 @@ def main(argv=None):
         elif args.command == "search":
             print(json.dumps(search(args.query), ensure_ascii=False))
         else:
-            who = env_caller(config())
+            who = None if args.curator else env_caller(config())
             with database() as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 source = db.execute("SELECT * FROM sources WHERE id=?", (args.source,)).fetchone()
-                if source is None or source["speaker"] != who:
+                if source is None:
+                    raise MemoryError("source_not_found")
+                if not args.curator and source["speaker"] != who:
                     raise MemoryError("source_not_bound_to_caller")
                 fact_id = put_fact(db, source, args.subject, args.key, args.value, args.quote, args.confidential)
             print(json.dumps({"ok": True, "version": fact_id}))

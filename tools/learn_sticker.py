@@ -36,14 +36,14 @@ def main():
     parser.add_argument("--owner", required=True, choices=["master", "xi"])
     parser.add_argument("--path")
     parser.add_argument("--latest", action="store_true")
-    parser.add_argument("--category", default="reply")
+    parser.add_argument("--category", default="like")
     parser.add_argument("--label", default="")
     args = parser.parse_args()
     c.assert_target(args.owner)
     src = args.path or (latest_inbound() if args.latest else "")
     if not src or not os.path.isfile(src):
         raise SystemExit("请用 --path 指定图片，或 --latest 取最新入站图片")
-    category = args.category if args.category in sticker_admin.CATEGORY_DESCRIPTIONS else "reply"
+    category = args.category if args.category in sticker_admin.CATEGORY_DESCRIPTIONS else "like"
     size = os.path.getsize(src)
     if size > sticker_admin.MAX_BYTES:
         raise SystemExit(f"图片超过 {sticker_admin.MAX_BYTES // 1024 // 1024}MB")

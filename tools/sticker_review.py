@@ -47,9 +47,9 @@ FONT_REGULAR = r"C:\Windows\Fonts\msyh.ttc"
 FONT_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"
 
 CATEGORY_ORDER = [
-    "happy", "affection", "meow", "shy", "teasing", "surprised",
-    "confused", "sad", "angry", "sleep", "tired", "greeting",
-    "food", "work", "entertainment", "like", "reply",
+    "happy", "affection", "comfort", "meow", "shy", "teasing", "surprised",
+    "confused", "sad", "angry", "sleep", "greeting",
+    "food", "work", "entertainment", "like",
 ]
 
 

@@ -386,7 +386,7 @@ def main():
     imp.add_argument("--source", required=True)
     imp.add_argument("--pack", required=True)
     imp.add_argument("--style", default="generic", choices=sorted(STYLES))
-    imp.add_argument("--default-category", default="reply")
+    imp.add_argument("--default-category", default="like")
     args = parser.parse_args()
     if args.cmd == "scan":
         return scan()

@@ -29,7 +29,9 @@
   `tools/`.
 - Prune unused sticker categories from the admin catalog and use `like` as the
   unknown-folder fallback, so the manifest/category list matches AGENTS and
-  `CATEGORIES.md` instead of advertising categories with no images.
+  `CATEGORIES.md` instead of advertising categories with no images. Learned and
+  imported stickers also default to `like` instead of the removed `reply`
+  category.
 
 ## 2026-11-07 - Sync deployed capture and midnight interval repairs
 

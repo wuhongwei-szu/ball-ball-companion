@@ -34,9 +34,9 @@
    sourced facts with `companion_memory.py learn --curator`.
 5. **Weekly reflection** — the weekly job writes `WEEKLY.md`, updates open
    topics/state, reviews `CARE_LOG.md` for proactive-care quality, and maintains
-   `IMPROVEMENTS.md`: low-risk fixes (facts, tags, notes, reminders) are applied
-   directly; changes to persona, rules or send behavior are written as
-   proposals for the human to approve.
+   `IMPROVEMENTS.md`: low-risk fixes (facts, tags, notes, THREADS/STATE) are
+   applied directly; changes to persona, rules, reminders or send behavior are
+   written as proposals for the human to approve.
 6. **Recall** — `companion_memory.recall()` returns a small viewer-first packet:
    the current person's facts and shared facts come first; the other person's
    facts/statements are only included when the current message explicitly

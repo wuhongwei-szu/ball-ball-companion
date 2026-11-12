@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Read-only health check for the companion bot."""
+import datetime
 import glob
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
@@ -87,6 +89,14 @@ def main():
     print(f"[{'OK' if enabled > 0 else '!!'}] 定时任务: {enabled} 启用 / {len(jobs)} 总数")
     if enabled <= 0:
         ok = False
+    required = c.CFG.get("required_crons") or []
+    if isinstance(required, list) and required:
+        active_ids = {j.get("id") for j in jobs if j.get("enabled")}
+        missing = [jid for jid in required if jid not in active_ids]
+        print(f"[{'OK' if not missing else '!!'}] 必需定时任务: {len(required) - len(missing)}/{len(required)}")
+        if missing:
+            print("    缺失: " + ", ".join(str(x) for x in missing))
+            ok = False
     if not report_capture_health(jobs):
         ok = False
 
@@ -117,13 +127,59 @@ def main():
         print("[!!] 最近整理: 缺失")
         ok = False
 
-    backups = glob.glob(os.path.join(BACKUP_DIR, "cc-weixin-backup-*.zip"))
-    latest_backup = latest(backups) or latest(glob.glob(os.path.join(BACKUP_DIR, "*.zip")))
+    backups = glob.glob(os.path.join(BACKUP_DIR, "cc-weixin-*.zip"))
+    latest_backup = latest(backups)
     if latest_backup:
-        print(f"[OK] 最近备份: {os.path.basename(latest_backup)}")
+        age_hours = (time.time() - os.path.getmtime(latest_backup)) / 3600.0
+        print(f"[OK] 最近备份: {os.path.basename(latest_backup)} ({age_hours:.1f} 小时前)")
+        if age_hours > 48:
+            print("[WARN] 最近备份超过 48 小时，检查 cc-connect-backup 计划任务")
     else:
         print("[!!] 最近备份: 缺失")
         ok = False
+
+    # Optional Platform usage cache: only inspect when an Admin key is configured.
+    admin_env = os.path.join(c.WORK_DIR, "config", "openai_admin.env")
+    admin_configured = False
+    if os.path.isfile(admin_env):
+        try:
+            with open(admin_env, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if line.strip().startswith("OPENAI_ADMIN_KEY=") and line.split("=", 1)[1].strip():
+                        admin_configured = True
+                        break
+        except OSError:
+            pass
+    usage_cache = os.path.join(c.MEMORY_DIR, "platform_usage.json")
+    if admin_configured:
+        if not os.path.isfile(usage_cache):
+            print("[WARN] Platform 用量缓存: 缺失")
+        else:
+            try:
+                with open(usage_cache, encoding="utf-8") as f:
+                    payload = json.load(f)
+                error = str(payload.get("error") or "")
+                stamp = str(payload.get("updated_at") or "")
+                age_min = None
+                if stamp:
+                    try:
+                        now = datetime.datetime.now()
+                        dt = datetime.datetime.strptime(f"{now.year}-{stamp}", "%Y-%m-%d %H:%M")
+                        if dt > now + datetime.timedelta(days=1):
+                            dt = dt.replace(year=now.year - 1)
+                        age_min = (now - dt).total_seconds() / 60.0
+                    except ValueError:
+                        pass
+                if error:
+                    print(f"[WARN] Platform 用量缓存: {error}")
+                elif age_min is not None and age_min > 90:
+                    print(f"[WARN] Platform 用量缓存: {age_min:.0f} 分钟未更新")
+                else:
+                    print("[OK] Platform 用量缓存: 已配置且新鲜")
+            except Exception as exc:
+                print(f"[WARN] Platform 用量缓存: 读取失败 {type(exc).__name__}")
+    else:
+        print("[--] Platform 额度: 未配置 Admin key（可选）")
 
     latest_log = latest(glob.glob(os.path.join(LOG_DIR, "*.log")))
     errors = []

@@ -28,6 +28,21 @@ CELL_H = 330
 MARGIN = 30
 HEADER = 110
 FOOTER = 45
+
+
+def _prefer_review_venv():
+    """Use the dedicated review venv when present.
+
+    The system Python on this machine can crash inside Pillow/reportlab while
+    decoding some GIFs; the review venv has a stable dependency set. The public
+    repository usually has no .venv-review, so it simply keeps the current
+    interpreter.
+    """
+    if os.name != "nt" or ".venv-review" in sys.executable:
+        return
+    venv_py = os.path.join(c.WORK_DIR, ".venv-review", "Scripts", "python.exe")
+    if os.path.isfile(venv_py) and os.path.abspath(venv_py) != os.path.abspath(sys.executable):
+        os.execv(venv_py, [venv_py, os.path.abspath(__file__)] + sys.argv[1:])
 FONT_REGULAR = r"C:\Windows\Fonts\msyh.ttc"
 FONT_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"
 
@@ -188,6 +203,7 @@ def build(outdir):
 
 
 def main():
+    _prefer_review_venv()
     parser = argparse.ArgumentParser()
     parser.add_argument("--outdir", default=DEFAULT_OUT)
     args = parser.parse_args()

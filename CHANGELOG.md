@@ -21,6 +21,11 @@
   expected to take more than 15 seconds.
 - Add a WeChat plain-text sanitizer in `send_msg.py` / `chat_burst.py` and a
   `reminder_admin.py` lifecycle/GC tool.
+- Structure pass: trim unrelated global environment sections from the private
+  AGENTS prompt, derive send sessions from `shared_memory.json` with the legacy
+  s1/s2 anchor as fallback, let `sticker_review.py` auto-select the dedicated
+  review venv when present, and move one-off maintenance prompts out of
+  `tools/`.
 
 ## 2026-11-07 - Sync deployed capture and midnight interval repairs
 

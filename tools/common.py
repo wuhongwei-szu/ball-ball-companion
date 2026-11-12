@@ -79,6 +79,31 @@ def load_config():
     return cfg
 
 
+def _session_from_shared_memory(role):
+    """Return the platform dm key from shared_memory.json when it is real.
+
+    The bot.config.json s1/s2 ids are legacy anchors; active internal session
+    ids rotate (s9/s10). shared_memory.json already binds each subject to the
+    stable platform dm key, so prefer it after verifying that the key exists in
+    the cc-connect user_sessions map. Fall back to _derive_session_key when the
+    file is missing or stale (e.g. a public template deployment).
+    """
+    try:
+        path = os.path.join(WORK_DIR, "config", "shared_memory.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        key = data.get("subjects", {}).get(role, {}).get("session_key", "")
+        if not isinstance(key, str) or not key:
+            return ""
+        with open(SESSION_FILE, encoding="utf-8") as f:
+            mapping = json.load(f).get("user_sessions", {})
+        if key in mapping or any(k.startswith(key + "#account:") for k in mapping):
+            return key
+    except Exception:
+        return ""
+    return ""
+
+
 def _derive_session_key(session_file, session_id):
     """Find the full weixin:dm:... key for an internal session id (s1/s2)."""
     try:
@@ -126,8 +151,8 @@ SESSION_FILE = CFG["session_file"]
 LABELS = CFG["labels"]
 BOT_NAME = CFG.get("bot_name", "Companion")
 
-MASTER_SESSION = _derive_session_key(SESSION_FILE, CFG.get("master_session_id", "s1"))
-XI_SESSION = _derive_session_key(SESSION_FILE, CFG.get("xi_session_id", "s2"))
+MASTER_SESSION = _session_from_shared_memory("master") or _derive_session_key(SESSION_FILE, CFG.get("master_session_id", "s1"))
+XI_SESSION = _session_from_shared_memory("xi") or _derive_session_key(SESSION_FILE, CFG.get("xi_session_id", "s2"))
 
 def _bound_weixin_accounts(platforms, cfg):
     """Resolve role bindings by configured public account ID, never list order."""

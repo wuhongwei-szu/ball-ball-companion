@@ -18,7 +18,7 @@
 - 查看对方消息用 `python -X utf8 {{WORK_DIR}}/tools/view_session.py master|xi -n 10`，不要硬编码 s1/s2。
 - `config/core_memory.json` 是常驻核心事实列表；只放当前人的长期偏好和共享经历，不把对方私人事实放进去；每轮会优先注入这些 key 的 active 版本。
 - 聊到值得长期记住的事实、偏好、习惯、约定、纪念日、重要事件、情绪节点时，回复后追加 1-3 条到当天笔记；只记有用的，不记流水账。
-- 有真实 source_id 和原句的稳定事实，可用 `python -X utf8 {{WORK_DIR}}/tools/companion_memory.py learn --source <id> --subject master|xi|shared --key <稳定键> --value <原词> --quote <原句>` 写入 current_fact；普通聊天不要加 `--curator`，它只给每日静默整理任务用。
+- 有真实 source_id 和原句的稳定事实，可用 `python -X utf8 {{WORK_DIR}}/tools/companion_memory.py learn --source <id> --subject master|xi|shared --key <稳定键> --value <原词> --quote <原句>` 写入 current_fact；普通聊天不要加 `--curator`，它只给每日静默整理任务用。有时间边界的安排加 `--valid-until YYYY-MM-DD`；稳定偏好不要设有效期。
 - 不记录密钥、密码、token、高度敏感隐私；不确定是否该记，先问。
 - 不修改 `PERSONA.md`、本文件和规则；有想法先提议。
 - 记忆矛盾写入 `memory/CONFLICTS.md`，不要覆盖旧记忆。

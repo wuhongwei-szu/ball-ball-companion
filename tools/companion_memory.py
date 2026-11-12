@@ -9,6 +9,7 @@ import contextlib
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -92,16 +93,36 @@ def database(root=ROOT):
                 id INTEGER PRIMARY KEY, subject TEXT NOT NULL, key TEXT NOT NULL,
                 value TEXT NOT NULL, source TEXT NOT NULL REFERENCES sources(id),
                 quote TEXT NOT NULL, active INTEGER NOT NULL, restricted INTEGER NOT NULL,
+                importance REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                last_accessed TEXT NOT NULL DEFAULT '',
+                valid_from TEXT NOT NULL DEFAULT '',
+                valid_until TEXT NOT NULL DEFAULT '',
                 changed_at TEXT NOT NULL, operation TEXT NOT NULL UNIQUE);
             CREATE UNIQUE INDEX IF NOT EXISTS current_fact ON facts(subject,key) WHERE active=1;
             PRAGMA user_version=1;
         """)
+        # Additive migration for databases created before memory policy fields.
+        cols = {row[1] for row in db.execute("PRAGMA table_info(facts)")}
+        additions = (
+            ("importance", "REAL NOT NULL DEFAULT 0.5"),
+            ("access_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_accessed", "TEXT NOT NULL DEFAULT ''"),
+            ("valid_from", "TEXT NOT NULL DEFAULT ''"),
+            ("valid_until", "TEXT NOT NULL DEFAULT ''"),
+        )
+        missing = [(name, ddl) for name, ddl in additions if name not in cols]
+        if missing:
+            with db:
+                for name, ddl in missing:
+                    db.execute("ALTER TABLE facts ADD COLUMN %s %s" % (name, ddl))
         yield db
     finally:
         db.close()
 
 
-def put_fact(db, source, subject, key, value, quote, confidential=False):
+def put_fact(db, source, subject, key, value, quote, confidential=False,
+             importance=None, valid_from="", valid_until=""):
     if subject not in (source["speaker"], "shared"):
         raise MemoryError("subject_not_supported_by_speaker")
     if not key or len(key) > 80 or not value or len(value) > 600:
@@ -112,15 +133,38 @@ def put_fact(db, source, subject, key, value, quote, confidential=False):
         raise MemoryError("credential_excluded")
     if subject == "shared" and not re.search(r"我们|一起|共同|球球", quote):
         raise MemoryError("joint_evidence_required")
+    valid_from = _normalize_validity(valid_from)
+    valid_until = _normalize_validity(valid_until, end=True)
+    importance_arg = importance
+    if importance is None:
+        importance = _default_importance(subject, key, value)
+    try:
+        importance = max(0.0, min(1.0, float(importance)))
+    except (TypeError, ValueError):
+        importance = 0.5
     op = hashlib.sha256(json.dumps([source["id"], subject, key, value], ensure_ascii=False).encode()).hexdigest()
     found = db.execute("SELECT id FROM facts WHERE operation=?", (op,)).fetchone()
     if found:
+        updates = []
+        params = []
+        if valid_from:
+            updates.append("valid_from=?")
+            params.append(valid_from)
+        if valid_until:
+            updates.append("valid_until=?")
+            params.append(valid_until)
+        if importance_arg is not None:
+            updates.append("importance=MAX(importance,?)")
+            params.append(importance)
+        if updates:
+            db.execute("UPDATE facts SET " + ",".join(updates) + " WHERE id=?", (*params, found[0]))
         return found[0]
     db.execute("UPDATE facts SET active=0 WHERE subject=? AND key=? AND active=1", (subject, key))
-    row = db.execute("""INSERT INTO facts(subject,key,value,source,quote,active,restricted,changed_at,operation)
-                        VALUES(?,?,?,?,?,1,?,?,?)""",
+    row = db.execute("""INSERT INTO facts(subject,key,value,source,quote,active,restricted,importance,access_count,last_accessed,valid_from,valid_until,changed_at,operation)
+                        VALUES(?,?,?,?,?,1,?,?,0,'',?,?,?,?)""",
                      (subject, key, value, source["id"], quote,
-                      int(confidential or source["restricted"]), source["at"], op))
+                      int(confidential or source["restricted"]), importance,
+                      valid_from, valid_until, source["at"], op))
     return row.lastrowid
 
 
@@ -181,7 +225,70 @@ def _core_keys(viewer, root=ROOT):
     return keys
 
 
-def recall(db, viewer, query="", limit=10, exclude_source=None):
+DECAY_DAYS = 30.0
+
+
+def _parse_iso(value):
+    try:
+        return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _normalize_validity(value, end=False):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value + ("T23:59:59" if end else "T00:00:00")
+    return value
+
+
+def _default_importance(subject, key, value):
+    try:
+        if key in _core_keys(subject):
+            return 1.0
+    except Exception:
+        pass
+    lowered = key.lower()
+    if any(marker in lowered for marker in (
+            "preference", "style", "relationship", "budget", "reminder",
+            "identity", "称呼", "习惯")):
+        return 0.8
+    return 0.6 if len(value) > 40 else 0.5
+
+
+def _fact_rank(fact, now_dt=None):
+    """Importance + decay + access count; old unused facts sink."""
+    now_dt = now_dt or dt.datetime.now().astimezone()
+    try:
+        importance = float(fact["importance"] or 0.5)
+    except Exception:
+        importance = 0.5
+    last = _parse_iso(fact["last_accessed"] or fact["changed_at"] or fact["at"])
+    if last is not None and last.tzinfo is None:
+        last = last.replace(tzinfo=now_dt.tzinfo)
+    age_days = max(0.0, (now_dt - last).total_seconds() / 86400.0) if last else 0.0
+    decay = math.exp(-age_days / DECAY_DAYS)
+    try:
+        access = min(int(fact["access_count"] or 0), 20)
+    except Exception:
+        access = 0
+    return importance * 0.6 + decay * 0.3 + min(access, 10) * 0.01
+
+
+def expire_facts(db, at=None):
+    """Deactivate facts whose valid_until has passed; returns the count."""
+    at = at or now()
+    with db:
+        cur = db.execute(
+            "UPDATE facts SET active=0 WHERE active=1 AND valid_until!='' AND valid_until<=?",
+            (at,),
+        )
+    return cur.rowcount
+
+
+def recall(db, viewer, query="", limit=10, exclude_source=None, record_access=False):
     """Return a small, attributable memory packet for one conversation.
 
     Retrieval is deliberately viewer-first: personal facts about the other
@@ -197,8 +304,13 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
     shared_query = any(marker in q for marker in ("我们", "一起", "共同", "咱"))
     allow_other = bool(q) and (shared_query or any(name in q for name in other_names))
 
+    now_iso = now()
+    now_dt = dt.datetime.now().astimezone()
     rows = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
-                          WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""", (viewer,)).fetchall()
+                          WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)
+                            AND (f.valid_from='' OR f.valid_from<=?)
+                            AND (f.valid_until='' OR f.valid_until>?)""",
+                      (viewer, now_iso, now_iso)).fetchall()
     scored = [(score(f["key"] + " " + f["value"], q) if q else 0, f) for f in rows]
     by_key = {f["key"]: f for _, f in scored if f["subject"] in (viewer, "shared")}
     core_facts = [by_key[key] for key in _core_keys(viewer) if key in by_key]
@@ -212,7 +324,7 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
             # No fact matches: keep recent viewer/shared facts as a fallback,
             # but cap them so a casual message does not dump every fact.
             recent = [f for _, f in scored if f["subject"] in (viewer, "shared")]
-            recent.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+            recent.sort(key=lambda f: (_fact_rank(f, now_dt), f["at"], f["id"]), reverse=True)
             matched = [(0, f) for f in recent[:3]]
         else:
             # Single-character bigrams make short Chinese queries match many
@@ -222,7 +334,8 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
             threshold = max(1.0, top * 0.35)
             matched = [(sc, f) for sc, f in matched if sc >= threshold]
         matched.sort(
-            key=lambda item: (item[0], item[1]["subject"] == viewer, item[1]["at"], item[1]["id"]),
+            key=lambda item: (item[0], item[1]["subject"] == viewer,
+                              _fact_rank(item[1], now_dt), item[1]["at"], item[1]["id"]),
             reverse=True,
         )
         combined = []
@@ -235,7 +348,7 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
         facts = combined[:limit]
     else:
         recent = [f for _, f in scored if f["subject"] in (viewer, "shared")]
-        recent.sort(key=lambda f: (f["at"], f["id"]), reverse=True)
+        recent.sort(key=lambda f: (_fact_rank(f, now_dt), f["at"], f["id"]), reverse=True)
         combined = []
         seen = set()
         for f in core_facts + recent[:3]:
@@ -268,6 +381,13 @@ def recall(db, viewer, query="", limit=10, exclude_source=None):
                            "at": item["at"], "source": item["id"], "text": item["text"][:500]})
             if len(result) >= limit + 4:
                 break
+    if record_access and facts:
+        with db:
+            for fact in facts:
+                db.execute(
+                    "UPDATE facts SET access_count=access_count+1,last_accessed=? WHERE id=?",
+                    (now_iso, fact["id"]),
+                )
     return result
 
 
@@ -281,7 +401,7 @@ def bridge(request, root=ROOT):
         if request.get("message_id") and request.get("user_id") not in ("timer", "cron"):
             source_id = ingest(db, request, speaker)
         entries = recall(db, speaker, request.get("text", ""), limit=8,
-                         exclude_source=source_id)
+                         exclude_source=source_id, record_access=True)
     packet = {"current_person": speaker, "source_id": source_id, "memory": entries}
     return ("【球球共同记忆·内部上下文】同一个人格、共同经历；master=主人，xi=茜茜。"
             "事实的subject是所属对象，speaker是来源说话者，不能互换。以下current_fact优先于旧聊天/旧摘要；"
@@ -304,11 +424,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="球球共同记忆：有来源、分主体、可更正")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("bridge")
+    sub.add_parser("expire")
     query = sub.add_parser("search");query.add_argument("query")
     learn = sub.add_parser("learn")
     for key in ("source", "subject", "key", "value", "quote"):
         learn.add_argument("--" + key, required=True)
     learn.add_argument("--confidential", action="store_true")
+    learn.add_argument("--importance", type=float,
+                       help="0-1; default derives from core/preference/content")
+    learn.add_argument("--valid-from", default="",
+                       help="YYYY-MM-DD or ISO timestamp")
+    learn.add_argument("--valid-until", default="",
+                       help="YYYY-MM-DD or ISO timestamp; date means end of day")
     learn.add_argument("--curator", action="store_true",
                        help="只供每日静默记忆整理使用：按来源说话者写入事实")
     args = parser.parse_args(argv)
@@ -318,6 +445,10 @@ def main(argv=None):
             print(bridge(request))
         elif args.command == "search":
             print(json.dumps(search(args.query), ensure_ascii=False))
+        elif args.command == "expire":
+            with database() as db:
+                count = expire_facts(db)
+            print(json.dumps({"expired": count}))
         else:
             who = None if args.curator else env_caller(config())
             with database() as db, db:
@@ -327,7 +458,10 @@ def main(argv=None):
                     raise MemoryError("source_not_found")
                 if not args.curator and source["speaker"] != who:
                     raise MemoryError("source_not_bound_to_caller")
-                fact_id = put_fact(db, source, args.subject, args.key, args.value, args.quote, args.confidential)
+                fact_id = put_fact(
+                    db, source, args.subject, args.key, args.value, args.quote,
+                    args.confidential, args.importance, args.valid_from, args.valid_until,
+                )
             print(json.dumps({"ok": True, "version": fact_id}))
         return 0
     except Exception:

@@ -23,6 +23,14 @@
   fact keys that are always injected for the current viewer; the query-matched
   facts and sources remain ranked below the core, and the other person's private
   facts are still excluded unless explicitly mentioned.
+- Add fact-level importance, access count, 30-day decay and temporal validity:
+  `recall()` records accesses and ranks by relevance/importance/decay/access;
+  `learn --valid-until` marks time-bound facts, and the daily `expire` command
+  retires them while preserving source history.
+- Add `deploy/cc-connect-usage-balance.patch` and
+  `docs/CC_CONNECT_USAGE_PATCH.md`: an env-driven cc-connect patch that appends
+  the Platform Pro-credit estimate to `/usage` without changing its existing
+  output. The cache is written by `usage_report.py`; credentials remain local.
 - Add a WeChat plain-text sanitizer in `send_msg.py` / `chat_burst.py` and a
   `reminder_admin.py` lifecycle/GC tool. The sanitizer strips paired `**bold**`
   but keeps math such as `2**3` and Python dunders such as `__name__`.

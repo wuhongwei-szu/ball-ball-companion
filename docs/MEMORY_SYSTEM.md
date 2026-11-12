@@ -50,6 +50,21 @@
 8. **Regression** — `memory_eval.py` runs a small set of real retrieval cases
    during the daily consolidation and records failures without changing data.
 
+## Importance, decay and validity
+
+- Facts carry `importance` (0-1), `access_count`, `last_accessed`, `valid_from`,
+  and `valid_until`.
+- `recall()` records an access each time a fact is injected into the bridge
+  packet. Ranking uses relevance first, then importance, a 30-day decay factor,
+  and access count; old low-importance facts sink instead of filling the
+  context.
+- `config/core_memory.json` lists stable keys that are always injected for the
+  current viewer; those facts default to importance 1.0.
+- Time-bound facts should be learned with `--valid-until YYYY-MM-DD`. The daily
+  consolidation runs `companion_memory.py expire`, which marks expired facts
+  inactive while keeping their source/history. Stable preferences should not
+  get an expiry date.
+
 ## Redaction
 
 `common.py` redacts common secret shapes before writing raw/recent:

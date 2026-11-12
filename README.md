@@ -19,6 +19,8 @@
 | 长期记忆 | 原文捕获 → 助手回复回填 → 每晚整理 → `MEMORY.md` / `STATE.md` / `EVENTS.md` / `THREADS.md` |
 | 当前事实 | `companion_memory.py` 的 `current_fact` 带来源/版本；检索按当前通道优先，跨人事实只在明确提到对方时注入 |
 | 核心记忆 | `config/core_memory.json` 常驻稳定偏好；每轮优先注入当前人的 active 版本，避免旧偏好被闲聊挤掉 |
+| 事实权重/有效期 | `importance + access_count + 30 天衰减` 自动降权旧事实；time-bound 事实用 `--valid-until`，每日 `expire` 自动失效 |
+| `/usage` Platform 行 | [cc-connect 补丁](deploy/cc-connect-usage-balance.patch) 在原有 `/usage` 后追加 Pro 额度预计剩余；配置见 [docs/CC_CONNECT_USAGE_PATCH.md](docs/CC_CONNECT_USAGE_PATCH.md) |
 | 每周反思 | 每周日生成 `memory/WEEKLY.md`，评估主动关怀与待改进点；`CARE_LOG.md` 记录已发主动消息；`IMPROVEMENTS.md` 维护低风险自我改进清单 |
 | 微信纯文本 | `send_msg.py` / `chat_burst.py` 发送前清理 `**`、标题、反引号和代码围栏 |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |

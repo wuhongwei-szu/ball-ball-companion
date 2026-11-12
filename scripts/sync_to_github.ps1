@@ -49,6 +49,10 @@ if (Test-Path -LiteralPath $coreExample) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Repo "config") | Out-Null
     Copy-Item -LiteralPath $coreExample -Destination (Join-Path $Repo "config\core_memory.example.json") -Force
 }
+$usagePatch = Join-Path $Source "maintenance\releases\20261112-usage-balance\cc-connect-usage-balance.patch"
+if (Test-Path -LiteralPath $usagePatch) {
+    Copy-Item -LiteralPath $usagePatch -Destination (Join-Path $Repo "deploy\cc-connect-usage-balance.patch") -Force
+}
 
 Push-Location $Repo
 try {

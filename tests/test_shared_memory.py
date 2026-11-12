@@ -43,11 +43,24 @@ class SharedMemoryTests(unittest.TestCase):
     def test_distinct_personal_preferences_shared_companion(self):
         self.add("master", "我喜欢红茶", "饮料", "红茶")
         self.add("xi", "我喜欢乌龙茶", "饮料", "乌龙茶")
-        for viewer in ("master", "xi"):
-            facts=m.search("饮料", self.root, viewer)
-            self.assertEqual({(f["subject"], f["value"]) for f in facts if f["kind"]=="current_fact"},
-                             {("master","红茶"),("xi","乌龙茶")})
-            self.assertEqual(facts[0]["subject"], viewer)
+        # Viewer-first: a normal query only injects the current person's own
+        # facts, so the other person's unrelated preference does not leak in.
+        master_facts = m.search("饮料", self.root, "master")
+        self.assertEqual({(f["subject"], f["value"]) for f in master_facts if f["kind"]=="current_fact"},
+                         {("master","红茶")})
+        self.assertEqual(master_facts[0]["subject"], "master")
+        xi_facts = m.search("饮料", self.root, "xi")
+        self.assertEqual({(f["subject"], f["value"]) for f in xi_facts if f["kind"]=="current_fact"},
+                         {("xi","乌龙茶")})
+        self.assertEqual(xi_facts[0]["subject"], "xi")
+        # Cross-person facts are available when the query explicitly mentions
+        # the other person, or uses a shared "we/together" context.
+        cross = m.search("茜茜喜欢什么饮料", self.root, "master")
+        self.assertIn(("xi","乌龙茶"),
+                      {(f["subject"], f["value"]) for f in cross if f["kind"]=="current_fact"})
+        shared = m.search("我们的饮料偏好", self.root, "xi")
+        self.assertIn(("master","红茶"),
+                      {(f["subject"], f["value"]) for f in shared if f["kind"]=="current_fact"})
 
     def test_joint_experience_visible_in_both_entrances(self):
         self.add("master", "我们一起去看了海", "一起出游", "看了海", "shared")

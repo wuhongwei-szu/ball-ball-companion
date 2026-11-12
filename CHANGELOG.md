@@ -27,6 +27,9 @@
   s1/s2 anchor as fallback, let `sticker_review.py` auto-select the dedicated
   review venv when present, and move one-off maintenance prompts out of
   `tools/`.
+- Prune unused sticker categories from the admin catalog and use `like` as the
+  unknown-folder fallback, so the manifest/category list matches AGENTS and
+  `CATEGORIES.md` instead of advertising categories with no images.
 
 ## 2026-11-07 - Sync deployed capture and midnight interval repairs
 

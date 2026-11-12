@@ -47,7 +47,6 @@ CATEGORY_DESCRIPTIONS = {
     "surprised": "震惊、意外、被吓到",
     "shy": "害羞、脸红、撒娇、不好意思",
     "sleep": "困倦、晚安、休息",
-    "tired": "疲惫、摆烂、没精神",
     "affection": "喜欢、亲昵、贴贴、安慰、感谢",
     "comfort": "安慰、抱抱、贴贴、摸头、合十、击掌、拍拍",
     "food": "吃饭、零食、馋、投喂",
@@ -55,14 +54,8 @@ CATEGORY_DESCRIPTIONS = {
     "work": "工作、加班、忙碌、摸鱼",
     "entertainment": "游戏、唱歌、娱乐、玩梗",
     "teasing": "吐槽、调侃、自嘲、坏笑、沙雕",
-    "reply": "普通回应、倾听、等待",
     "meow": "卖萌、猫猫、可爱互动",
-    "morning": "早安专用",
-    "baka": "轻微责备、可爱型抱怨",
-    "sigh": "无奈、无语、感慨",
-    "see": "偷瞄、关注、观察",
     "like": "喜欢某个事物、点赞",
-    "refusal": "拒绝、不行、不同意",
 }
 
 PACK_STYLES = {
@@ -157,9 +150,9 @@ def _maybe_shrink(path):
 def _infer_meta(path, root):
     parts = _rel(path, root).split("/")
     pack = parts[0] if parts else "unknown"
-    category = parts[1] if len(parts) > 1 else "reply"
+    category = parts[1] if len(parts) > 1 else "like"
     if category not in CATEGORY_DESCRIPTIONS:
-        category = "reply"
+        category = "like"
     style = PACK_STYLES.get(pack.lower(), "generic")
     if pack.lower() == "chinesebqb":
         sub = parts[1].lower() if len(parts) > 1 else ""

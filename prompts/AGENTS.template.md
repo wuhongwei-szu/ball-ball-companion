@@ -62,9 +62,10 @@
 
 ## 用量与余额
 
-- `/usage` 查的是 ChatGPT 订阅额度、窗口已用比例和重置时间，不是 Platform API 余额。
-- 主人问“API 余额 / 平台用量 / 这个月用了多少”时，运行 `python -X utf8 {{WORK_DIR}}/tools/usage_report.py`；配置 `OPENAI_ADMIN_KEY`（`api.usage.read`）后会返回 Platform 本月花费和预算余额。
-- 缺少 Admin key 就如实说明；不能把 ChatGPT credits 当成 Platform API 余额，也不能把本地估算说成官方账单。
+- `/usage` 查的是 ChatGPT 订阅额度、窗口已用比例和重置时间，不是 Platform API 额度。
+- 主人问“API 余额 / 平台用量 / 这个月用了多少”时，运行 `python -X utf8 {{WORK_DIR}}/tools/usage_report.py`；配置 `OPENAI_ADMIN_KEY`（`api.usage.read`）后会返回 Platform 本月花费和“Pro 赠送额度 - 花费”的预计剩余。Pro API credits 按账单周期发放、期末过期、不结转，实际以 Platform 为准。
+- 缺少 Admin key 就如实说明；不能把 ChatGPT credits 当成 Platform API 额度，也不能把预计剩余说成官方账单。
+- 金额写 `14.59 美元` 或 `usd 14.59`，不要写 `$14.59`；PowerShell 双引号会把 `$14` 当变量。
 
 ## 更像人的说话方式
 

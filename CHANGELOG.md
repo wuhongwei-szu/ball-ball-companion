@@ -27,10 +27,14 @@
   cc-connect binary). Retention is 14 daily / 28 full; legacy backups keep the
   newest plus 7 days.
 - Add `usage_report.py`: ChatGPT OAuth subscription usage (plan/window/reset)
-  plus OpenAI Platform month-to-date cost and remaining budget when an Admin
-  key with `api.usage.read` is configured. The normal project key cannot read
-  Platform billing; the legacy prepaid-credit endpoint needs a browser session
-  key and is optional. Credentials are never printed or committed.
+  plus OpenAI Platform month-to-date cost and an estimated remaining Pro
+  API-credit grant when an Admin key with `api.usage.read` is configured.
+  Pro credits are monthly grants that expire at the end of the billing cycle
+  and do not roll over; the official balance stays on Platform. The normal
+  project key cannot read Platform billing; the legacy prepaid-credit endpoint
+  needs a browser session key and is optional. Credentials are never printed
+  or committed. Amounts should be written as `14.59 美元`/`usd 14.59`, not
+  `$14.59`, because PowerShell expands `$14` as a variable.
 - Structure pass: trim unrelated global environment sections from the private
   AGENTS prompt, derive send sessions from `shared_memory.json` with the legacy
   s1/s2 anchor as fallback, let `sticker_review.py` auto-select the dedicated

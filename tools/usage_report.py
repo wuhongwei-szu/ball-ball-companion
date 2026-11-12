@@ -74,7 +74,9 @@ def _config():
     for path in (Path.home() / ".cc-connect" / "openai_admin.env",
                  ROOT / "config" / "openai_admin.env"):
         merged.update(_load_env_file(path))
-    for key in ("OPENAI_ADMIN_KEY", "OPENAI_MONTHLY_BUDGET", "OPENAI_SESSION_KEY"):
+    for key in ("OPENAI_ADMIN_KEY", "OPENAI_MONTHLY_BUDGET", "OPENAI_SESSION_KEY",
+                "OPENAI_PRO_CREDIT", "OPENAI_MONTHLY_CREDIT",
+                "OPENAI_CREDIT_REFRESH_DAY", "OPENAI_CREDIT_REFRESH_NOTE"):
         if os.environ.get(key):
             merged[key] = os.environ[key]
     return merged
@@ -179,12 +181,15 @@ def _write_cache(report):
     available = credits.get("total_available")
     payload = {
         "cost": platform.get("cost"),
+        "credit": platform.get("credit", platform.get("budget")),
         "budget": platform.get("budget"),
         "remaining": platform.get("remaining"),
         "currency": platform.get("currency", "usd"),
         "period_start": platform.get("period_start"),
         "period_end": platform.get("period_end"),
         "credits_available": "" if available is None else str(available),
+        "refresh_day": platform.get("refresh_day", ""),
+        "refresh_note": platform.get("refresh_note", ""),
         "updated_at": datetime.datetime.now().astimezone().strftime("%m-%d %H:%M"),
         "error": platform.get("error", ""),
     }
@@ -207,12 +212,20 @@ def build_report():
         "error": "未配置 OPENAI_ADMIN_KEY（Platform 需要 api.usage.read 的 Admin key）"
     }
     try:
-        budget = float(cfg.get("OPENAI_MONTHLY_BUDGET", "100"))
+        credit = float(cfg.get("OPENAI_PRO_CREDIT")
+                       or cfg.get("OPENAI_MONTHLY_CREDIT")
+                       or cfg.get("OPENAI_MONTHLY_BUDGET")
+                       or "100")
     except ValueError:
-        budget = 100.0
+        credit = 100.0
+    refresh_day = str(cfg.get("OPENAI_CREDIT_REFRESH_DAY", "")).strip()
+    refresh_note = str(cfg.get("OPENAI_CREDIT_REFRESH_NOTE", "")).strip()
     if "cost" in platform:
-        platform["budget"] = round(budget, 2)
-        platform["remaining"] = round(budget - platform["cost"], 2)
+        platform["credit"] = round(credit, 2)
+        platform["budget"] = round(credit, 2)  # legacy cache key
+        platform["remaining"] = round(credit - platform["cost"], 2)
+        platform["refresh_day"] = refresh_day
+        platform["refresh_note"] = refresh_note
     session_key = cfg.get("OPENAI_SESSION_KEY", "")
     credits = fetch_credit_grants(session_key) if session_key else {"error": "未配置可选 OPENAI_SESSION_KEY"}
     report = {"chatgpt": chatgpt, "platform": platform, "credit_grants": credits}
@@ -235,9 +248,15 @@ def format_text(report):
                      % (chat.get("credits_balance", "?"), chat.get("has_credits", "?")))
     plat = report["platform"]
     if "cost" in plat:
-        lines.append("Platform API 本月：%s %.2f / 预算 %.2f，剩余 %.2f（%s—%s）"
-                     % (plat.get("currency", "usd"), plat["cost"], plat.get("budget", 0),
-                        plat.get("remaining", 0), plat.get("period_start", ""), plat.get("period_end", "")))
+        refresh = ""
+        if plat.get("refresh_day"):
+            refresh = "；额度刷新：每月%s日，具体以 Platform 为准" % plat["refresh_day"]
+        elif plat.get("refresh_note"):
+            refresh = "；额度刷新：%s" % plat["refresh_note"]
+        lines.append("Platform API 本月：%s %.2f / Pro 额度 %.2f，预计剩余 %.2f（按 Pro 额度折算%s；%s—%s）"
+                     % (plat.get("currency", "usd"), plat["cost"], plat.get("credit", 0),
+                        plat.get("remaining", 0), refresh,
+                        plat.get("period_start", ""), plat.get("period_end", "")))
     else:
         lines.append("Platform API 本月：不可用（%s）" % plat.get("error", "unknown"))
     credits = report["credit_grants"]

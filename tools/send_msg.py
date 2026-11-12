@@ -75,15 +75,27 @@ def send_xi(text, relay=False):
 
 
 def main():
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:]
     relay = "--relay" in args
     if relay:
         args.remove("--relay")
-    if len(args) < 2:
+    use_stdin = "--stdin" in args
+    if use_stdin:
+        args.remove("--stdin")
+    if len(args) < 1:
         print('用法: python -X utf8 send_msg.py master|xi [--relay] "消息"')
+        print('  或: ... | python -X utf8 send_msg.py master|xi [--relay] --stdin')
         return 1
     target = args[0].lower()
-    text = " ".join(args[1:]).strip()
+    if use_stdin:
+        text = sys.stdin.read().strip()
+    else:
+        if len(args) < 2:
+            print('用法: python -X utf8 send_msg.py master|xi [--relay] "消息"')
+            return 1
+        text = " ".join(args[1:]).strip()
     if not text:
         print("消息为空")
         return 1

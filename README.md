@@ -236,10 +236,12 @@ cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/2
 
 ### 用量与余额
 
-- `/usage` 返回的是 **ChatGPT 订阅**额度、窗口已用比例和重置时间，不是 Platform API 余额。
-- `python -X utf8 tools/usage_report.py` 会同时返回 ChatGPT 订阅信息；配置 `OPENAI_ADMIN_KEY`（需要 `api.usage.read`）后，还会返回 Platform 本月花费和“预算 - 花费”的预算余额。
+- `/usage` 返回的是 **ChatGPT 订阅**额度、窗口已用比例和重置时间。
+- `python -X utf8 tools/usage_report.py` 会同时返回 ChatGPT 订阅信息；配置 `OPENAI_ADMIN_KEY`（需要 `api.usage.read`）后，还会返回 Platform 本月花费和“Pro 赠送额度 - 花费”的预计剩余。
+- Pro 的 API credits 是按订阅账单周期发放的月度 grant，期末过期、不结转，首次按剩余天数折算；实际余额以 Platform 账单/额度页为准。
 - Admin key 放在 `config/openai_admin.env` 或环境变量里，不要提交；示例见 `config/openai_admin.env.example`。
-- 预付费 credit 余额接口需要浏览器 session key，默认不配置；没有就只看本月花费和预算余额，不能把它说成官方账单。
+- 预付费 credit 余额接口需要浏览器 session key，默认不配置；没有就只看本月花费和按 Pro 额度折算的预计剩余。
+- 微信里金额写 `14.59 美元` 或 `usd 14.59`，不要写 `$14.59`（PowerShell 会把 `$14` 当变量）。
 
 ## 隐私与安全
 

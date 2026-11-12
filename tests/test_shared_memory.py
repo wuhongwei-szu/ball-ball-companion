@@ -32,12 +32,12 @@ class SharedMemoryTests(unittest.TestCase):
                 "user_id": role, "message_id": msg, "text": text,
                 "at": "2026-11-05T18:00:00+08:00"}
 
-    def add(self, role, text, key, value, subject=None, msg="1"):
+    def add(self, role, text, key, value, subject=None, msg="1", **kwargs):
         with m.database(self.root) as db:
             sid = m.ingest(db, self.req(role, text, msg), role)
             source = db.execute("SELECT * FROM sources WHERE id=?", (sid,)).fetchone()
             with db:
-                m.put_fact(db, source, subject or role, key, value, text)
+                m.put_fact(db, source, subject or role, key, value, text, **kwargs)
             return sid
 
     def test_distinct_personal_preferences_shared_companion(self):
@@ -66,6 +66,27 @@ class SharedMemoryTests(unittest.TestCase):
         self.add("master", "我们一起去看了海", "一起出游", "看了海", "shared")
         for who in ("master","xi"):
             self.assertEqual(m.search("出游",self.root,who)[0]["subject"], "shared")
+
+    def test_expired_fact_is_not_current(self):
+        self.add("master", "我喜欢红茶", "饮料", "红茶", valid_until="2000-01-01")
+        facts = m.search("饮料", self.root, "master")
+        self.assertNotIn(("master", "红茶"),
+                         {(f["subject"], f["value"]) for f in facts if f["kind"] == "current_fact"})
+        self.add("master", "我喜欢绿茶", "饮料2", "绿茶", msg="2", valid_until="2999-01-01")
+        facts = m.search("绿茶", self.root, "master")
+        self.assertIn(("master", "绿茶"),
+                      {(f["subject"], f["value"]) for f in facts if f["kind"] == "current_fact"})
+
+    def test_access_count_and_importance(self):
+        self.add("master", "我喜欢红茶", "饮料", "红茶", importance=0.9)
+        with m.database(self.root) as db:
+            m.recall(db, "master", "饮料", record_access=True)
+            row = db.execute(
+                "SELECT importance, access_count, last_accessed FROM facts WHERE key='饮料'"
+            ).fetchone()
+            self.assertAlmostEqual(row["importance"], 0.9)
+            self.assertGreaterEqual(row["access_count"], 1)
+            self.assertTrue(row["last_accessed"])
 
     def test_one_explicit_correction_immediately_replaces_old_value(self):
         m.bridge(self.req(text="记住我的饮料偏好是红茶"),self.root)

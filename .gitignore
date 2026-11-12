@@ -42,3 +42,6 @@ Thumbs.db
 config/shared_memory.json
 *.sqlite3
 *.sqlite3-*
+
+# Platform usage credentials (use config/openai_admin.env.example)
+config/openai_admin.env

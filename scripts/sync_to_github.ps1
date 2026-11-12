@@ -24,7 +24,8 @@ $names = @(
     "capture_transcripts.py", "capture_review.py", "whoami.py",
     "view_session.py", "add_reminder.py", "reminder_admin.py",
     "care_scheduler.py", "care_timer_state.py", "reset_agent_threads.py",
-    "learn_sticker.py", "healthcheck.py", "backup.ps1", "setup_tasks.ps1"
+    "learn_sticker.py", "healthcheck.py", "backup.ps1", "setup_tasks.ps1",
+    "usage_report.py"
 )
 foreach ($name in $names) {
     $src = Join-Path $toolsSrc $name
@@ -36,6 +37,12 @@ foreach ($name in $names) {
 $wrapper = Join-Path $Source "bin\codex_wrapper.c"
 if (Test-Path -LiteralPath $wrapper) {
     Copy-Item -LiteralPath $wrapper -Destination (Join-Path $Repo "deploy\codex_wrapper.c") -Force
+}
+
+$configExample = Join-Path $Source "config\openai_admin.env.example"
+if (Test-Path -LiteralPath $configExample) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $Repo "config") | Out-Null
+    Copy-Item -LiteralPath $configExample -Destination (Join-Path $Repo "config\openai_admin.env.example") -Force
 }
 
 Push-Location $Repo

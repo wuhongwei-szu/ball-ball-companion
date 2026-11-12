@@ -26,6 +26,11 @@
   sticker metadata) and a Sunday full archive (also assets images and the
   cc-connect binary). Retention is 14 daily / 28 full; legacy backups keep the
   newest plus 7 days.
+- Add `usage_report.py`: ChatGPT OAuth subscription usage (plan/window/reset)
+  plus OpenAI Platform month-to-date cost and remaining budget when an Admin
+  key with `api.usage.read` is configured. The normal project key cannot read
+  Platform billing; the legacy prepaid-credit endpoint needs a browser session
+  key and is optional. Credentials are never printed or committed.
 - Structure pass: trim unrelated global environment sections from the private
   AGENTS prompt, derive send sessions from `shared_memory.json` with the legacy
   s1/s2 anchor as fallback, let `sticker_review.py` auto-select the dedicated

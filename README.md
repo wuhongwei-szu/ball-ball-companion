@@ -234,6 +234,13 @@ cc-connect v1.5.0 默认的本地发送保护会把普通回复也计入四条/2
 检索；跨人事实只在当前消息明确提到对方时注入。所有写入前自动脱敏。
 详见 [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md)。
 
+### 用量与余额
+
+- `/usage` 返回的是 **ChatGPT 订阅**额度、窗口已用比例和重置时间，不是 Platform API 余额。
+- `python -X utf8 tools/usage_report.py` 会同时返回 ChatGPT 订阅信息；配置 `OPENAI_ADMIN_KEY`（需要 `api.usage.read`）后，还会返回 Platform 本月花费和“预算 - 花费”的预算余额。
+- Admin key 放在 `config/openai_admin.env` 或环境变量里，不要提交；示例见 `config/openai_admin.env.example`。
+- 预付费 credit 余额接口需要浏览器 session key，默认不配置；没有就只看本月花费和预算余额，不能把它说成官方账单。
+
 ## 隐私与安全
 
 - **不提交**：bot token、openid、API key、聊天记录、日志、session、备份、`config/bot.config.json`、本地表情素材/生成图片（`assets/`、`artifacts/`）。

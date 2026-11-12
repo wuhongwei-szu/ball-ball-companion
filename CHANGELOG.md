@@ -22,6 +22,10 @@
 - Add a WeChat plain-text sanitizer in `send_msg.py` / `chat_burst.py` and a
   `reminder_admin.py` lifecycle/GC tool. The sanitizer strips paired `**bold**`
   but keeps math such as `2**3` and Python dunders such as `__name__`.
+- Split backups into a light daily archive (memory/tools/config/sessions and
+  sticker metadata) and a Sunday full archive (also assets images and the
+  cc-connect binary). Retention is 14 daily / 28 full; legacy backups keep the
+  newest plus 7 days.
 - Structure pass: trim unrelated global environment sections from the private
   AGENTS prompt, derive send sessions from `shared_memory.json` with the legacy
   s1/s2 anchor as fallback, let `sticker_review.py` auto-select the dedicated

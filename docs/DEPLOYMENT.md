@@ -76,7 +76,12 @@ powershell -ExecutionPolicy Bypass -File tools\setup_tasks.ps1 -BotRoot C:\ai-co
 ```
 
 The watchdog runs every 5 minutes; the launcher itself skips when cc-connect
-is already running. Backup runs daily at 04:17.
+is already running. Backup runs daily at 04:17: Monday–Saturday produces a
+light `cc-weixin-daily-*.zip` (memory/tools/config/sessions + sticker metadata),
+and Sunday produces a full `cc-weixin-full-*.zip` (also assets images and the
+cc-connect binary). Daily backups are kept 14 days, full backups 28 days, and
+old legacy `cc-weixin-backup-*.zip` files keep the newest plus 7 days. Use
+`backup.ps1 -Full` for a manual full backup.
 
 ## 7. Verify
 

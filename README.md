@@ -22,7 +22,7 @@
 | 微信纯文本 | `send_msg.py` / `chat_burst.py` 发送前清理 `**`、标题、反引号和代码围栏 |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
 | 安全 | 原文写入前自动脱敏；`allow_from` 限制使用者；私有配置 gitignore |
-| 运维 | 隐藏自启、5 分钟看门狗、每日备份、日志轮转、只读健康检查 |
+| 运维 | 隐藏自启、5 分钟看门狗、每日轻量 + 每周完整备份、日志轮转、只读健康检查 |
 
 ## 架构
 
@@ -141,7 +141,7 @@ work_dir/
      用 `deploy/start_cc.example.bat` 模板设置 `CC_CODEX_REAL` 与 PATH。
    - 详细步骤见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
-8. **安装看门狗与每日备份（可选）**
+8. **安装看门狗与备份任务（可选）**
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File tools\setup_tasks.ps1 -BotRoot C:\ai-companion

@@ -90,7 +90,7 @@ def main():
     if not report_capture_health(jobs):
         ok = False
 
-    for name in ("MEMORY.md", "STATE.md", "EVENTS.md"):
+    for name in ("MEMORY.md", "STATE.md", "EVENTS.md", "WEEKLY.md", "IMPROVEMENTS.md", "CARE_LOG.md"):
         path = os.path.join(c.MEMORY_DIR, name)
         print(f"[{'OK' if os.path.isfile(path) else '!!'}] 记忆文件: {name}")
         if not os.path.isfile(path):

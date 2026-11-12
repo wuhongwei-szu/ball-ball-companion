@@ -378,8 +378,8 @@ def sanitize_wechat(text):
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
     # Strip paired **bold** only; keep math like 2**3 and Python dunders.
     # We deliberately leave __...__ alone because it is indistinguishable from
-    # Python names such as __name__.
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.S)
+    # Python names such as __name__. The lookarounds keep 2**3 和 4**5 intact.
+    text = re.sub(r"(?<![\w])\*\*(?!\s)(.+?)(?<!\s)\*\*(?![\w])", r"\1", text)
     text = re.sub(r"(?m)^\s*```[^\n]*$", "", text)
     text = text.replace("`", "")
     return text

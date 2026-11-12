@@ -61,6 +61,7 @@ work_dir/
     ├── send_sticker.py        # 选图/额度/冷却 + 发送一张表情
     ├── sticker_admin.py       # 表情库 scan/validate/list/catalog/import
     ├── sticker_tag.py         # 表情语义标签维护（--auto/--set/--list）
+    ├── sticker_review.py      # 生成表情图鉴 PDF/CSV/HTML（优先使用 .venv-review）
     ├── send_tts.py            # Edge TTS 生成晓晓语音 MP3 并以文件发送
     ├── memory_search.py       # 本地记忆关键词检索
     ├── companion_memory.py    # 有来源的共同记忆（bridge/search/learn）

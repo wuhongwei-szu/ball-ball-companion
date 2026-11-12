@@ -10,7 +10,9 @@
   plus sourced/versioned `current_fact` writes and a small `memory_eval.py`
   regression set (private deployment-specific cases are not published).
 - Add a weekly reflection job (`WEEKLY.md`, `CARE_LOG.md`) that reviews
-  proactive-care quality and updates open topics/state.
+  proactive-care quality and updates open topics/state. It also maintains
+  `IMPROVEMENTS.md`: low-risk fixes (facts, tags, notes, reminders) are applied
+  directly; changes to persona/rules/send behavior are proposals only.
 - Add a `comfort` sticker category with semantic overlay
   `assets/stickers/sticker_tags.json`, `sticker_tag.py` (auto/set/list), and
   comfort-aware selection that does not narrow to one style.

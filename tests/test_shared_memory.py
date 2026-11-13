@@ -158,6 +158,47 @@ class SharedMemoryTests(unittest.TestCase):
         self.assertTrue(m.search("绿茶",self.root,"xi"))
         self.assertFalse(m.search("绿茶",self.root,"master"))
 
+    def test_confidential_fact_also_hides_original_source(self):
+        self.add("xi", "我喜欢桂花茶", "饮料", "桂花茶", confidential=True)
+        own = m.search("桂花茶", self.root, "xi")
+        self.assertEqual({item["kind"] for item in own}, {"current_fact", "source_statement"})
+        # An explicit cross-person query may otherwise retrieve the raw source.
+        self.assertEqual(m.search("茜茜喜欢桂花茶吗", self.root, "master"), [])
+
+    def test_relearning_can_tighten_confidentiality_without_new_version(self):
+        sid = self.add("xi", "我喜欢桂花茶", "饮料", "桂花茶")
+        self.assertTrue(m.search("茜茜喜欢桂花茶吗", self.root, "master"))
+        with m.database(self.root) as db, db:
+            source = db.execute("SELECT * FROM sources WHERE id=?", (sid,)).fetchone()
+            before = db.execute("SELECT id FROM facts").fetchone()[0]
+            restricted = m.put_fact(db, source, "xi", "饮料", "桂花茶", "我喜欢桂花茶",
+                                    confidential=True)
+            replay = m.put_fact(db, source, "xi", "饮料", "桂花茶", "我喜欢桂花茶")
+            self.assertEqual((restricted, replay), (before, before))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM facts").fetchone()[0], 1)
+        self.assertEqual(m.search("茜茜喜欢桂花茶吗", self.root, "master"), [])
+        self.assertTrue(m.search("桂花茶", self.root, "xi"))
+
+    def test_legacy_restricted_fact_hides_public_sibling_and_source(self):
+        sid = self.add("xi", "我喜欢桂花茶和红茶", "饮料", "桂花茶")
+        with m.database(self.root) as db, db:
+            # Legacy databases can contain a restricted fact and an unrestricted
+            # source, including an inactive confidential version of that fact.
+            db.execute("UPDATE facts SET restricted=1, active=0")
+            source = db.execute("SELECT * FROM sources WHERE id=?", (sid,)).fetchone()
+            self.assertEqual(source["restricted"], 0)
+            m.put_fact(db, source, "xi", "其他饮料", "红茶", "我喜欢桂花茶和红茶")
+        self.assertEqual(m.search("茜茜喜欢红茶吗", self.root, "master"), [])
+        self.assertTrue(any(item["kind"] == "current_fact"
+                            for item in m.search("红茶", self.root, "xi")))
+
+    def test_restricted_source_hides_legacy_unrestricted_fact(self):
+        sid = self.add("xi", "我喜欢桂花茶", "饮料", "桂花茶")
+        with m.database(self.root) as db, db:
+            db.execute("UPDATE sources SET restricted=1 WHERE id=?", (sid,))
+        self.assertEqual(m.search("茜茜喜欢桂花茶吗", self.root, "master"), [])
+        self.assertTrue(m.search("桂花茶", self.root, "xi"))
+
     def test_credentials_never_persist(self):
         for index,text in enumerate(("密码：fixture-secret-value", "我的密码是fixture-secret-value", "API key为fixture-secret-value")):
             m.bridge(self.req(text=text,msg=str(index)),self.root)

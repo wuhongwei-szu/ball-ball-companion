@@ -34,7 +34,8 @@ This is not an end-to-end delivery test or a complete service regression pass.
 The two small Python repairs were subsequently deployed and synchronized:
 capture now recognizes generated care/reminder templates, and the proactive
 minimum interval survives midnight. The original legacy marker substring
-false-positive remains documented as an expected test failure. Unlimited-budget
+false-positive is fixed in the public capture runtime and covered by a passing
+regression. Unlimited-budget
 semantics are unchanged; the old audit archive's broader budget refactor was
 not deployed. Tests use synthetic state and never import private configuration.
 The installed cc-connect build has additional Go account-routing, timer and

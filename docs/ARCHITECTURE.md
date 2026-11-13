@@ -21,12 +21,13 @@
 4. `send_msg.py` / `chat_burst.py` write outgoing bubbles to
    `memory/raw/s1|s2/` and `memory/recent_replies.md` (redacted);
    `send_sticker.py` records sticker usage and quotas.
-5. Every five minutes `capture_transcripts.py` appends new user/assistant
-   messages from the cc-connect session JSON to `memory/raw/`.
+5. Every five minutes `capture_transcripts.py` appends new attributable user
+   messages from the cc-connect session JSON to `memory/raw/`; assistant
+   generations are retained as review ranges, not confirmed deliveries.
 6. `capture_review.py` archives only attributable `assistant_unverified` ranges,
    labeling them as generated replies whose delivery is unverified. It uses the
-   capture lock and durable pending markers; baselines remain unresolved. The daily consolidation cron then runs
-   `memory_eval.py`, updates `MEMORY.md`, `EVENTS.md`, `STATE.md`, and
+   capture lock and durable pending markers; baselines remain unresolved. The daily consolidation cron updates
+   `MEMORY.md`, `EVENTS.md`, `STATE.md`, and
    `THREADS.md`, and writes sourced `current_fact` rows with
    `companion_memory.py learn --curator`.
 7. At 08:17 `care_scheduler.py` plans one daily care evaluation for each recipient.

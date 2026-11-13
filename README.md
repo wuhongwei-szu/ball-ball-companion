@@ -1,6 +1,6 @@
 # Ball Ball Companion
 
-当前稳定版：[v0.3.0](https://github.com/wuhongwei-szu/ball-ball-companion/releases/tag/v0.3.0) · [更新日志](CHANGELOG.md)
+当前稳定版：[v0.3.1](https://github.com/wuhongwei-szu/ball-ball-companion/releases/tag/v0.3.1) · [更新日志](CHANGELOG.md)
 
 一个可自托管的微信 AI 陪伴机器人：**两个微信 bot、共享人格与长期记忆、自然多气泡、表情包、一次性提醒、上下文关怀**。
 
@@ -23,7 +23,7 @@
 | 当前事实 | `companion_memory.py` 的 `current_fact` 带来源/版本；检索按当前通道优先，跨人事实只在明确提到对方时注入 |
 | 核心记忆 | `config/core_memory.json` 常驻稳定偏好；每轮优先注入当前人的 active 版本，避免旧偏好被闲聊挤掉 |
 | 事实权重/有效期 | `importance + access_count + 30 天衰减` 自动降权旧事实；time-bound 事实用 `--valid-until`，每日 `expire` 自动失效 |
-| `/usage` Platform 行 | [cc-connect 补丁](deploy/cc-connect-usage-balance.patch) 在原有 `/usage` 后追加 Pro 额度预计剩余；配置见 [docs/CC_CONNECT_USAGE_PATCH.md](docs/CC_CONNECT_USAGE_PATCH.md) |
+| `/usage` Platform 行 | [账单时段补丁](deploy/cc-connect-usage-freshness.patch) 显示 UTC 查询范围、已返回费用与最后金额结果日；配置见 [docs/CC_CONNECT_USAGE_PATCH.md](docs/CC_CONNECT_USAGE_PATCH.md) |
 | 每周反思 | 每周日生成 `memory/WEEKLY.md`，评估主动关怀与待改进点；`CARE_LOG.md` 记录已发主动消息；`IMPROVEMENTS.md` 维护低风险自我改进清单 |
 | 微信纯文本 | `send_msg.py` / `chat_burst.py` 发送前清理 `**`、标题、反引号和代码围栏 |
 | 反重复 | 最近 20 条回复写入 `recent_replies.md`，新会话读取以避免重复 |
@@ -243,10 +243,10 @@ cc-connect v1.5.0 默认本地发送保护也会计入普通回复。示例使�
 ### 用量与余额
 
 - `/usage` 返回的是 **ChatGPT 订阅**额度、窗口已用比例和重置时间。
-- `python -X utf8 tools/usage_report.py` 会同时返回 ChatGPT 订阅信息；配置 `OPENAI_ADMIN_KEY`（需要 `api.usage.read`）后，还会返回 Platform 本月花费和“Pro 赠送额度 - 花费”的预计剩余。
-- Pro 的 API credits 是按订阅账单周期发放的月度 grant，期末过期、不结转，首次按剩余天数折算；实际余额以 Platform 账单/额度页为准。
+- `python -X utf8 tools/usage_report.py` 会同时返回 ChatGPT 订阅信息；配置 `OPENAI_ADMIN_KEY`（需要 `api.usage.read`）后，统计 UTC 自然月内 API 已返回的费用，处理完整分页，分别显示查询时段、最后含金额结果日、最后返回桶与抓取时间。
+- 空日桶不代表该日费用已经完整返回。配置额度减去已返回费用只称“参考差额”，不当作 Pro 账期余额；官方额度与账期仍以 Platform 为准。
 - Admin key 放在 `config/openai_admin.env` 或环境变量里，不要提交；示例见 `config/openai_admin.env.example`。
-- 预付费 credit 余额接口需要浏览器 session key，默认不配置；没有就只看本月花费和按 Pro 额度折算的预计剩余。
+- 可选旧 credit 接口需要浏览器 session key，默认不配置；没有时只展示已返回费用与配置参考差额。Go 补丁与 Python 缓存格式必须配套，旧缓存会提示刷新。
 - 微信里金额写 `14.59 美元` 或 `usd 14.59`，不要写 `$14.59`（PowerShell 会把 `$14` 当变量）。
 
 ## 隐私与安全

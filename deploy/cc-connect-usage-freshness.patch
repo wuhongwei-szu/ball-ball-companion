@@ -1,0 +1,433 @@
+--- a/core/interfaces.go
++++ b/core/interfaces.go
+@@ -546,16 +546,25 @@
+ // CC-connect's /usage keeps its existing subscription quota output and appends
+ // this as one extra line when OPENAI_USAGE_CACHE is configured.
+ type PlatformUsage struct {
+-	Cost             float64
+-	Credit           float64
+-	Budget           float64 // legacy cache key
+-	Remaining        float64
+-	Currency         string
+-	CreditsAvailable string
+-	RefreshDay       string
+-	RefreshNote      string
+-	UpdatedAt        string
+-	Error            string
++	Version             int
++	Cost                float64
++	Credit              float64
++	Budget              float64 // legacy cache key
++	Remaining           float64
++	ReferenceDifference *float64
++	HasCostResults      bool
++	PeriodTimezone      string
++	QueryStart          string
++	QueryEnd            string
++	LastCostDate        string
++	LastBucketDate      string
++	FetchedAt           string
++	Currency            string
++	CreditsAvailable    string
++	RefreshDay          string
++	RefreshNote         string
++	UpdatedAt           string
++	Error               string
+ }
+ 
+ // ContextUsageReporter is an optional interface for running agent sessions that
+--- a/core/engine.go
++++ b/core/engine.go
+@@ -8661,58 +8661,38 @@
+ 	if platform == nil {
+ 		return ""
+ 	}
++	i18n := NewI18n(lang)
++	if platform.Error == "platform_cache_refresh_required" {
++		return i18n.T(MsgPlatformCostsRefresh)
++	}
+ 	if platform.Error != "" {
+-		switch lang {
+-		case LangChinese, LangTraditionalChinese:
+-			return "Platform 余额：" + platform.Error
+-		default:
+-			return "Platform balance: " + platform.Error
+-		}
++		return i18n.Tf(MsgPlatformCostsError, platform.Error)
++	}
++	if platform.Version != 2 || platform.PeriodTimezone != "UTC" || platform.QueryStart == "" || platform.QueryEnd == "" {
++		return i18n.T(MsgPlatformCostsRefresh)
+ 	}
+ 	currency := platform.Currency
+ 	if currency == "" {
+ 		currency = "usd"
+ 	}
+-	updated := platform.UpdatedAt
+-	if updated == "" {
+-		updated = "-"
+-	}
+-	credit := platform.Credit
+-	if credit == 0 {
+-		credit = platform.Budget
+-	}
+-	refresh := ""
+-	if platform.RefreshDay != "" {
+-		refresh = "额度刷新：每月" + platform.RefreshDay + "日"
+-	} else if platform.RefreshNote != "" {
+-		refresh = "额度刷新：" + platform.RefreshNote
+-	}
+-	var line string
+-	switch lang {
+-	case LangChinese, LangTraditionalChinese:
+-		detail := "数据更新 " + updated
+-		if refresh != "" {
+-			detail = refresh + "；" + detail
+-		}
+-		line = fmt.Sprintf("Platform 本月：%s %.2f / Pro 额度 %.2f，预计剩余 %.2f（%s）",
+-			currency, platform.Cost, credit, platform.Remaining, detail)
+-	default:
+-		detail := "data updated " + updated
+-		if platform.RefreshDay != "" {
+-			detail = "credit refresh: day " + platform.RefreshDay + "; " + detail
+-		} else if platform.RefreshNote != "" {
+-			detail = "credit refresh: " + platform.RefreshNote + "; " + detail
+-		}
+-		line = fmt.Sprintf("Platform this month: %s %.2f / Pro credit %.2f, estimated remaining %.2f (%s)",
+-			currency, platform.Cost, credit, platform.Remaining, detail)
++	lastCost, lastBucket := platform.LastCostDate, platform.LastBucketDate
++	if lastCost == "" {
++		lastCost = "-"
++	}
++	if lastBucket == "" {
++		lastBucket = "-"
++	}
++	amount := i18n.T(MsgPlatformCostsEmpty)
++	if platform.HasCostResults {
++		amount = fmt.Sprintf("%s %.2f", currency, platform.Cost)
++	}
++	line := i18n.Tf(MsgPlatformCostsSnapshot, amount, platform.QueryStart, platform.QueryEnd,
++		lastCost, lastBucket, platform.FetchedAt)
++	if platform.ReferenceDifference != nil {
++		line += i18n.Tf(MsgPlatformCostsReference, platform.Credit, *platform.ReferenceDifference)
+ 	}
+ 	if platform.CreditsAvailable != "" {
+-		switch lang {
+-		case LangChinese, LangTraditionalChinese:
+-			line += "，credit 余额 " + platform.CreditsAvailable
+-		default:
+-			line += ", credit balance " + platform.CreditsAvailable
+-		}
++		line += i18n.Tf(MsgPlatformCostsCreditsValue, platform.CreditsAvailable)
+ 	}
+ 	return line
+ }
+--- a/core/i18n.go
++++ b/core/i18n.go
+@@ -323,6 +323,13 @@
+ 	MsgUsageNotSupported  MsgKey = "usage_not_supported"
+ 	MsgUsageFetchFailed   MsgKey = "usage_fetch_failed"
+ 
++	MsgPlatformCostsError        MsgKey = "platform_costs_error"
++	MsgPlatformCostsRefresh      MsgKey = "platform_costs_refresh"
++	MsgPlatformCostsEmpty        MsgKey = "platform_costs_empty"
++	MsgPlatformCostsSnapshot     MsgKey = "platform_costs_snapshot"
++	MsgPlatformCostsReference    MsgKey = "platform_costs_reference"
++	MsgPlatformCostsCreditsValue MsgKey = "platform_costs_creditsvalue"
++
+ 	// Inline strings previously hardcoded in engine.go
+ 	MsgStatusMode             MsgKey = "status_mode"
+ 	MsgStatusSession          MsgKey = "status_session"
+@@ -650,6 +657,49 @@
+ )
+ 
+ var messages = map[MsgKey]map[Language]string{
++	MsgPlatformCostsError: {
++		LangEnglish:            "Platform costs: %s",
++		LangChinese:            "Platform 账单：%s",
++		LangTraditionalChinese: "Platform 帳單：%s",
++		LangJapanese:           "Platform 費用：%s",
++		LangSpanish:            "Costes de Platform: %s",
++	},
++	MsgPlatformCostsRefresh: {
++		LangEnglish:            "Platform costs: refresh required; UTC period or cost-result date unavailable",
++		LangChinese:            "Platform 账单：缓存需刷新，缺少有效UTC时段或金额结果日期",
++		LangTraditionalChinese: "Platform 帳單：快取需更新，缺少有效UTC期間或金額結果日期",
++		LangJapanese:           "Platform 費用：キャッシュの更新が必要です。UTC期間または金額結果日がありません",
++		LangSpanish:            "Costes de Platform: actualice la caché; falta el período UTC o la fecha del resultado monetario",
++	},
++	MsgPlatformCostsEmpty: {
++		LangEnglish:            "no monetary results (zero spend not confirmed)",
++		LangChinese:            "暂无金额结果（不能确认零花费）",
++		LangTraditionalChinese: "暫無金額結果（無法確認零費用）",
++		LangJapanese:           "金額の結果なし（費用ゼロは未確認）",
++		LangSpanish:            "sin resultados monetarios (gasto cero no confirmado)",
++	},
++	MsgPlatformCostsSnapshot: {
++		LangEnglish:            "Platform returned costs: %s\nUTC query [%s, %s); last monetary-result day %s; last returned bucket %s; fetched %s. Empty buckets do not establish billing completeness; unreturned costs are excluded.",
++		LangChinese:            "Platform 已返回费用：%s\nUTC查询 [%s, %s)；最后含金额结果日 %s；最后返回桶 %s；抓取 %s。空桶不证明已出账，未返回费用未计入。",
++		LangTraditionalChinese: "Platform 已返回費用：%s\nUTC查詢 [%s, %s)；最後含金額結果日 %s；最後返回桶 %s；擷取 %s。空桶不代表費用完整，未返回費用未計入。",
++		LangJapanese:           "Platform が返した費用：%s\nUTC期間 [%s, %s)；金額結果の最終日 %s；最終バケット %s；取得 %s。空のバケットは請求の完了を示しません。未返却の費用は含みません。",
++		LangSpanish:            "Costes devueltos por Platform: %s\nConsulta UTC [%s, %s); último día con importe %s; último bloque %s; consulta %s. Los bloques vacíos no confirman una factura completa; se excluyen costes no devueltos.",
++	},
++	MsgPlatformCostsReference: {
++		LangEnglish:            "\nConfigured reference credit %.2f; reference difference %.2f (not a balance; unreturned costs excluded; grant period unverified)",
++		LangChinese:            "\n配置参考额度 %.2f；参考差额 %.2f（非余额，未计未出账费用，账期未核对）",
++		LangTraditionalChinese: "\n設定參考額度 %.2f；參考差額 %.2f（非餘額，未計未返回費用，帳期未核對）",
++		LangJapanese:           "\n設定上の参考額 %.2f；参考差額 %.2f（残高ではありません。未返却の費用を除外し、付与期間は未確認です）",
++		LangSpanish:            "\nCrédito de referencia configurado %.2f; diferencia de referencia %.2f (no es un saldo; excluye costes no devueltos; período sin verificar)",
++	},
++	MsgPlatformCostsCreditsValue: {
++		LangEnglish:            "; credit endpoint available value %s",
++		LangChinese:            "；credit接口可用值 %s",
++		LangTraditionalChinese: "；credit介面可用值 %s",
++		LangJapanese:           "；credit APIの利用可能値 %s",
++		LangSpanish:            "; valor disponible del endpoint de crédito %s",
++	},
++
+ 	MsgStarting: {
+ 		LangEnglish:            "⏳ Processing...",
+ 		LangChinese:            "⏳ 处理中...",
+--- a/agent/codex/usage.go
++++ b/agent/codex/usage.go
+@@ -5,10 +5,12 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"io"
++	"math"
+ 	"net/http"
+ 	"os"
+ 	"path/filepath"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/chenhg5/cc-connect/core"
+ )
+@@ -73,31 +75,71 @@
+ 		return &core.PlatformUsage{Error: "缓存未更新"}
+ 	}
+ 	var payload struct {
+-		Cost             float64 `json:"cost"`
+-		Credit           float64 `json:"credit"`
+-		Budget           float64 `json:"budget"`
+-		Remaining        float64 `json:"remaining"`
+-		Currency         string  `json:"currency"`
+-		CreditsAvailable string  `json:"credits_available"`
+-		RefreshDay       string  `json:"refresh_day"`
+-		RefreshNote      string  `json:"refresh_note"`
+-		UpdatedAt        string  `json:"updated_at"`
+-		Error            string  `json:"error"`
++		Version             int      `json:"version"`
++		Cost                *float64 `json:"cost"`
++		Credit              *float64 `json:"credit"`
++		Budget              *float64 `json:"budget"`
++		ReferenceDifference *float64 `json:"reference_difference"`
++		Currency            string   `json:"currency"`
++		HasCostResults      bool     `json:"has_cost_results"`
++		PeriodTimezone      string   `json:"period_timezone"`
++		QueryStart          string   `json:"query_start"`
++		QueryEnd            string   `json:"query_end"`
++		LastCostDate        string   `json:"last_cost_date"`
++		LastBucketDate      string   `json:"last_bucket_date"`
++		FetchedAt           string   `json:"fetched_at"`
++		CreditsAvailable    string   `json:"credits_available"`
++		Error               string   `json:"error"`
++	}
++	invalid := func() *core.PlatformUsage {
++		return &core.PlatformUsage{Error: "platform_cache_refresh_required"}
+ 	}
+ 	if err := json.Unmarshal(data, &payload); err != nil {
+-		return &core.PlatformUsage{Error: "缓存格式错误"}
++		return invalid()
++	}
++	if payload.Error != "" {
++		return &core.PlatformUsage{Error: payload.Error}
++	}
++	start, startErr := time.Parse(time.RFC3339, payload.QueryStart)
++	end, endErr := time.Parse(time.RFC3339, payload.QueryEnd)
++	_, fetchedErr := time.Parse(time.RFC3339, payload.FetchedAt)
++	_, startOffset := start.Zone()
++	_, endOffset := end.Zone()
++	if payload.Version != 2 || payload.PeriodTimezone != "UTC" || payload.Cost == nil ||
++		startErr != nil || endErr != nil || fetchedErr != nil || !end.After(start) ||
++		startOffset != 0 || endOffset != 0 {
++		return invalid()
++	}
++	dateValid := func(value string) bool {
++		parsed, err := time.Parse("2006-01-02", value)
++		return err == nil && !parsed.Before(start.UTC().Truncate(24*time.Hour)) &&
++			!parsed.After(end.UTC().Truncate(24*time.Hour))
++	}
++	if (payload.LastBucketDate != "" && !dateValid(payload.LastBucketDate)) ||
++		(payload.HasCostResults && (!dateValid(payload.LastCostDate) ||
++			payload.LastBucketDate == "" || payload.LastCostDate > payload.LastBucketDate)) ||
++		(!payload.HasCostResults && (payload.LastCostDate != "" || *payload.Cost != 0)) {
++		return invalid()
++	}
++	credit := payload.Credit
++	if credit == nil {
++		credit = payload.Budget
++	}
++	configuredCredit := 0.0
++	if credit != nil {
++		configuredCredit = *credit
++	}
++	if payload.ReferenceDifference != nil && (!payload.HasCostResults || credit == nil ||
++		payload.Currency != "usd" || math.Abs(configuredCredit-*payload.Cost-*payload.ReferenceDifference) > 0.02) {
++		return invalid()
+ 	}
+ 	return &core.PlatformUsage{
+-		Cost:             payload.Cost,
+-		Credit:           payload.Credit,
+-		Budget:           payload.Budget,
+-		Remaining:        payload.Remaining,
+-		Currency:         payload.Currency,
+-		CreditsAvailable: payload.CreditsAvailable,
+-		RefreshDay:       payload.RefreshDay,
+-		RefreshNote:      payload.RefreshNote,
+-		UpdatedAt:        payload.UpdatedAt,
+-		Error:            payload.Error,
++		Version: payload.Version, Cost: *payload.Cost, Credit: configuredCredit,
++		Currency: payload.Currency, ReferenceDifference: payload.ReferenceDifference,
++		HasCostResults: payload.HasCostResults, PeriodTimezone: payload.PeriodTimezone,
++		QueryStart: payload.QueryStart, QueryEnd: payload.QueryEnd,
++		LastCostDate: payload.LastCostDate, LastBucketDate: payload.LastBucketDate,
++		FetchedAt: payload.FetchedAt, CreditsAvailable: payload.CreditsAvailable,
+ 	}
+ }
+ 
+--- /dev/null
++++ b/core/platform_usage_cache_test.go
+@@ -0,0 +1,53 @@
++package core
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestPlatformUsageShowsUTCMonetaryResultDateAndReferenceOnly(t *testing.T) {
++	difference := 75.0
++	value := &PlatformUsage{Version: 2, Cost: 25, Credit: 100,
++		ReferenceDifference: &difference, HasCostResults: true,
++		PeriodTimezone: "UTC", QueryStart: "2026-11-01T00:00:00Z",
++		QueryEnd: "2026-11-13T16:30:00Z", LastCostDate: "2026-11-12",
++		LastBucketDate: "2026-11-13", FetchedAt: "2026-11-13T16:30:00Z"}
++	for _, lang := range []Language{LangChinese, LangEnglish, LangTraditionalChinese, LangJapanese, LangSpanish} {
++		text := formatPlatformUsage(value, lang)
++		for _, want := range []string{"UTC", "2026-11-12", "2026-11-13", "75.00"} {
++			if !strings.Contains(text, want) {
++				t.Errorf("missing %q in %q", want, text)
++			}
++		}
++		if strings.Contains(text, "预计剩余") || strings.Contains(text, "estimated remaining") {
++			t.Errorf("unverified grant balance claimed: %q", text)
++		}
++	}
++}
++
++func TestPlatformUsageTranslationsCoverEverySupportedLanguage(t *testing.T) {
++	for _, key := range []MsgKey{MsgPlatformCostsError, MsgPlatformCostsRefresh,
++		MsgPlatformCostsEmpty, MsgPlatformCostsSnapshot, MsgPlatformCostsReference, MsgPlatformCostsCreditsValue} {
++		for _, lang := range []Language{LangEnglish, LangChinese, LangTraditionalChinese, LangJapanese, LangSpanish} {
++			if messages[key][lang] == "" {
++				t.Errorf("missing translation %s/%s", key, lang)
++			}
++		}
++	}
++}
++
++func TestPlatformUsageEmptyBucketsAreNotDisplayedAsZeroSpend(t *testing.T) {
++	text := formatPlatformUsage(&PlatformUsage{Version: 2, PeriodTimezone: "UTC",
++		QueryStart: "2026-11-01T00:00:00Z", QueryEnd: "2026-11-13T00:00:00Z",
++		LastBucketDate: "2026-11-12"}, LangChinese)
++	if !strings.Contains(text, "不能确认零花费") || strings.Contains(text, "usd 0.00") {
++		t.Fatalf("empty bucket treated as a zero cost result: %q", text)
++	}
++}
++
++func TestPlatformUsageLegacyCacheNeedsRefresh(t *testing.T) {
++	text := formatPlatformUsage(&PlatformUsage{Cost: 14.59, Remaining: 85.41}, LangChinese)
++	if !strings.Contains(text, "缓存需刷新") || strings.Contains(text, "85.41") {
++		t.Fatalf("legacy cache still claims a balance: %q", text)
++	}
++}
+--- /dev/null
++++ b/agent/codex/platform_usage_cache_test.go
+@@ -0,0 +1,77 @@
++package codex
++
++import (
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func platformUsageFixture() map[string]any {
++	return map[string]any{"version": 2, "cost": 25.0, "credit": 100.0,
++		"reference_difference": 75.0, "currency": "usd", "has_cost_results": true,
++		"period_timezone": "UTC", "query_start": "2026-11-01T00:00:00Z",
++		"query_end": "2026-11-13T16:30:00Z", "last_cost_date": "2026-11-12",
++		"last_bucket_date": "2026-11-13", "fetched_at": "2026-11-13T16:30:00Z"}
++}
++
++func TestReadPlatformUsagePreservesActualMonetaryResultDate(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "usage.json")
++	t.Setenv("OPENAI_USAGE_CACHE", path)
++	data, _ := json.Marshal(platformUsageFixture())
++	if err := os.WriteFile(path, data, 0600); err != nil {
++		t.Fatal(err)
++	}
++	value := readPlatformUsage()
++	if value == nil || value.Error != "" || value.LastCostDate != "2026-11-12" ||
++		value.LastBucketDate != "2026-11-13" || value.ReferenceDifference == nil ||
++		*value.ReferenceDifference != 75 {
++		t.Fatalf("invalid cache result: %#v", value)
++	}
++}
++
++func TestReadPlatformUsageRejectsLegacyOrContradictoryMetadata(t *testing.T) {
++	for _, name := range []string{"legacy", "timezone", "offset", "missing_cost", "missing_date", "later_cost", "balance", "bad_end"} {
++		t.Run(name, func(t *testing.T) {
++			data := platformUsageFixture()
++			switch name {
++			case "legacy":
++				delete(data, "version")
++			case "timezone":
++				data["period_timezone"] = "local"
++			case "offset":
++				data["query_end"] = "2026-11-13T16:30:00+08:00"
++			case "missing_cost":
++				delete(data, "cost")
++			case "missing_date":
++				delete(data, "last_cost_date")
++			case "later_cost":
++				data["last_cost_date"] = "2026-11-14"
++			case "balance":
++				data["reference_difference"] = 99
++			case "bad_end":
++				data["query_end"] = "2026-10-31T00:00:00Z"
++			}
++			path := filepath.Join(t.TempDir(), "usage.json")
++			t.Setenv("OPENAI_USAGE_CACHE", path)
++			payload, _ := json.Marshal(data)
++			if err := os.WriteFile(path, payload, 0600); err != nil {
++				t.Fatal(err)
++			}
++			if value := readPlatformUsage(); value == nil || value.Error == "" {
++				t.Fatalf("invalid metadata accepted: %#v", value)
++			}
++		})
++	}
++}
++
++func TestReadPlatformUsagePreservesErrorWithoutFabricatingMoney(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "usage.json")
++	t.Setenv("OPENAI_USAGE_CACHE", path)
++	if err := os.WriteFile(path, []byte(`{"error":"Platform costs HTTP 403"}`), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if value := readPlatformUsage(); value == nil || value.Error != "Platform costs HTTP 403" {
++		t.Fatalf("error lost: %#v", value)
++	}
++}

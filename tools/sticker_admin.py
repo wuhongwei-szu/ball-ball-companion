@@ -162,7 +162,10 @@ def _infer_meta(path, root):
         elif sub == "pig":
             style = "pig"
             category = "teasing"
-    if category == "meow" and style == "generic":
+    # Packs may specify pack/category/style/file for mixed animal artwork.
+    if len(parts) >= 4 and parts[2] in STYLES:
+        style = parts[2]
+    elif category == "meow" and style == "generic":
         style = "cat"
     return pack, category, style
 

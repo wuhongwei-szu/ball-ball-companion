@@ -114,18 +114,6 @@ def _last_sent(sent):
     return max(stamps) if stamps else None
 
 
-def _recent_ids(sent):
-    cutoff = _now() - datetime.timedelta(days=RECENT_DAYS)
-    ids = set()
-    for item in sent:
-        if not isinstance(item, dict):
-            continue
-        at = _parse_at(item.get("at", ""))
-        if at and at >= cutoff:
-            ids.add(item.get("id", ""))
-    return ids
-
-
 def choose(manifest, category=None, style=None, sticker_id=None):
     stickers = manifest["stickers"]
     if sticker_id:
@@ -153,21 +141,30 @@ def _select_candidate(manifest, category, style, sticker_id, state, target, pref
     if sticker_id:
         return base
     pool = [e for e in manifest["stickers"] if e.get("category") == base.get("category")]
-    if style:
-        styled = [e for e in pool if e.get("style") == style]
-        if styled:
-            pool = styled
-    elif base.get("category") == "comfort":
-        # Comfort deliberately mixes cute/generic art with the big-fish
-        # stickers; do not narrow to one style or the single silly entry
-        # would always win.
-        pass
-    else:
-        for preferred in DEFAULT_STYLES.get(target, ()):
-            styled = [e for e in pool if e.get("style") == preferred]
-            if styled:
-                pool = styled
-                break
+    feedback = c.load_json(os.path.join(c.STICKER_DIR, "feedback.json"), {})
+    if isinstance(feedback, dict):
+        banned = {sid for sid, fb in feedback.items() if isinstance(fb, dict) and fb.get("banned")}
+        pool = [entry for entry in pool if entry["id"] not in banned]
+        if not pool:
+            return None
+    clear = [e for e in pool if min(int(e.get("width", 0)), int(e.get("height", 0))) >= MIN_DIM]
+    pool = clear or pool
+
+    # Rotate across the whole emotion category before applying aesthetic preferences.
+    last_used = {}
+    for item in state.get("sent", []):
+        at = _parse_at(item.get("at", ""))
+        if at:
+            key = item.get("id", "")
+            last_used[key] = max(at.timestamp(), last_used.get(key, 0.0))
+    cutoff = (_now() - datetime.timedelta(days=RECENT_DAYS)).timestamp()
+    fresh = [e for e in pool if last_used.get(e["id"], 0) < cutoff]
+    if fresh:
+        pool = fresh
+    elif len(pool) > 1:
+        oldest = min(last_used[e["id"]] for e in pool)
+        pool = [e for e in pool if last_used[e["id"]] == oldest]
+
     if prefer:
         keywords = [k.strip().lower() for k in re.split(r"[,，\s]+", prefer) if k.strip()]
         matched = []
@@ -181,32 +178,14 @@ def _select_candidate(manifest, category, style, sticker_id, state, target, pref
             pool = matched
         else:
             print(f"[sticker] prefer={prefer} 没有匹配，改用同分类", file=sys.stderr)
-    clear = [e for e in pool if min(int(e.get("width", 0)), int(e.get("height", 0))) >= MIN_DIM]
-    if clear:
-        pool = clear
-    feedback = c.load_json(os.path.join(c.STICKER_DIR, "feedback.json"), {})
-    if isinstance(feedback, dict):
-        banned = {
-            sid for sid, fb in feedback.items()
-            if isinstance(fb, dict) and fb.get("banned")
-        }
-        pool = [e for e in pool if e.get("id") not in banned]
-        if not pool:
-            return None
-    recent = _recent_ids(state.get("sent", []))
-    fresh = [e for e in pool if e.get("id") not in recent]
-    pool = fresh or pool
-    # Prefer stickers not used recently; randomize among the oldest half.
-    last_used = {}
-    for item in state.get("sent", []):
-        if isinstance(item, dict):
-            at = _parse_at(item.get("at", ""))
-            if at:
-                key = item.get("id", "")
-                last_used[key] = max(at.timestamp(), last_used.get(key, 0.0))
-    pool.sort(key=lambda e: last_used.get(e.get("id", ""), 0.0))
-    head = pool[: max(1, min(8, len(pool)))]
-    return random.choice(head)
+    styles = (style,) if style else DEFAULT_STYLES.get(target, ())
+    if style or category != "comfort":
+        for preferred in styles:
+            styled = [e for e in pool if e.get("style") == preferred]
+            if styled:
+                pool = styled
+                break
+    return random.choice(pool)
 
 
 def _send_master(path):

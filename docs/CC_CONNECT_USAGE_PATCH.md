@@ -1,71 +1,108 @@
-# cc-connect `/usage` Platform credit line
+# cc-connect `/usage` UTC cost snapshot
 
-This patch keeps the existing cc-connect `/usage` output unchanged and appends
-one line for OpenAI Platform usage:
+The subscription quota/reset output stays unchanged. Platform costs now show
+which UTC period was queried and the latest day with an actual monetary result.
+Refreshing a cache is separate from receiving a new day's cost results.
 
 ```text
-Platform 本月：usd 14.59 / Pro 额度 100.00，预计剩余 85.41
-（额度刷新：预计每月14日，具体以 Platform 为准；数据更新 11-12 17:19）
+Platform 已返回费用：usd 25.00
+UTC查询 [2026-11-01T00:00:00Z, 2026-11-13T16:30:00Z)；最后含金额结果日 2026-11-12；最后返回桶 2026-11-13；抓取 2026-11-13T16:30:00Z。空桶不证明已出账，未返回费用未计入。
+配置参考额度 100.00；参考差额 75.00（非余额，未计未出账费用，账期未核对）
 ```
 
-## Base source
+## API and date contract
 
-- cc-connect 1.5.0 maintained source digest
-  `4251459e772d1a60d5df4dc4bcb0466c803863e1c29a9632374abff115cbcb6b`.
-- Patch: `deploy/cc-connect-usage-balance.patch` (three files:
-  `core/interfaces.go`, `core/engine.go`, `agent/codex/usage.go`).
+The [official Costs API reference](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs)
+defines an inclusive `start_time`, exclusive `end_time`, daily buckets and
+`has_more` / `next_page` pagination. The implementation queries from UTC midnight
+on the first of the current UTC month to the query instant, and follows every
+page. Local midnight is not used: it previously admitted the previous UTC day's
+costs into a supposedly current-month total.
 
-## Apply and build
+Buckets outside the requested start-day range are excluded. Identical overlapping
+buckets are counted once; conflicting copies, malformed monetary data, mixed
+currencies, failed pages and repeated/missing cursors reject the entire total.
+No partial page sum is presented as the full query result.
 
-From a cc-connect source tree matching the base digest:
+`last_cost_date` is the latest UTC bucket containing a numeric monetary result,
+including an explicit zero. `last_bucket_date` also includes empty buckets.
+An empty bucket is not treated as a zero monetary result or evidence that its
+day's costs have finished arriving. Neither date certifies that all prior costs
+are final. A response with no monetary results says so instead of displaying
+zero spend. Fetch time does not advance either date.
+
+## Source and build
+
+- The original feature patch remains `deploy/cc-connect-usage-balance.patch`.
+- `deploy/cc-connect-usage-freshness.patch` is an incremental patch against the
+  retained original-voice maintenance source (`maintained-source.zip`, release
+  20261113-153928-original-voice), which already includes the original usage
+  feature. Source archive SHA-256:
+  `4ad0a0f5f033acad5460c0ff5fcb2f9271822221eb02c1847e332ee9f02f0f46`.
+  It changes `core/interfaces.go`, the usage formatter in `core/engine.go`,
+  five-language messages in `core/i18n.go`, `agent/codex/usage.go`, and two
+  focused regression tests.
+- Apply it to that exact maintained baseline, then run:
 
 ```bash
-patch -p1 < deploy/cc-connect-usage-balance.patch
-go build -mod=readonly -p=2 \
-  -ldflags="-X main.version=1.5.0-usage-balance -X main.commit=local-usage-balance" \
-  -o cc-connect-usage.exe ./cmd/cc-connect
+patch -p1 < deploy/cc-connect-usage-freshness.patch
+go test -mod=readonly ./core ./agent/codex -run PlatformUsage
+go build -mod=readonly -o cc-connect-usage.exe ./cmd/cc-connect
 ```
 
-Keep a copy of the original binary for rollback and verify the WeChat platforms
-are `platform ready` after replacing it.
+Do not replace an active binary as part of patch preparation. Preserve the
+current executable, source, configuration and sessions for a separately
+approved deployment. Updating the formatter first makes old caches visibly
+require refresh; do not install the new Python producer with an old formatter
+that interprets a null balance as zero.
 
-## Cache contract
+## Version 2 cache
 
-The patch reads a JSON file named by `OPENAI_USAGE_CACHE`. Set it in the
-launcher environment, for example:
-
-```bat
-set "OPENAI_USAGE_CACHE=C:\cc-weixin\memory\platform_usage.json"
-```
-
-`tools/usage_report.py` writes the cache (optionally every 30 minutes):
+Set `OPENAI_USAGE_CACHE` to the local JSON cache. The Python producer writes it
+atomically through the existing shared helper. This is an example with fixture
+numbers, not a real account snapshot:
 
 ```json
 {
-  "cost": 14.5909,
+  "version": 2,
+  "cost": 25.0,
   "credit": 100.0,
   "budget": 100.0,
-  "remaining": 85.41,
+  "remaining": null,
+  "reference_difference": 75.0,
   "currency": "usd",
+  "period_start": "2026-11-01",
+  "period_end": "2026-11-13",
+  "period_timezone": "UTC",
+  "query_start": "2026-11-01T00:00:00Z",
+  "query_end": "2026-11-13T16:30:00Z",
+  "last_cost_date": "2026-11-12",
+  "last_bucket_date": "2026-11-13",
+  "has_cost_results": true,
+  "empty_buckets": 1,
+  "pages": 2,
+  "fetched_at": "2026-11-13T16:30:00Z",
   "credits_available": "",
-  "refresh_day": "",
-  "refresh_note": "预计每月14日，具体以 Platform 为准",
-  "updated_at": "11-12 17:19",
   "error": ""
 }
 ```
 
-`budget` is kept for older caches; `credit` takes precedence. If `error` is
-non-empty, `/usage` shows that error instead of a fabricated number.
+The formatter rejects legacy caches or contradictory/missing UTC metadata.
+A nonempty `error` is displayed instead of money. Refresh failures therefore
+cannot turn into an apparent zero cost or an increased balance. API response
+bodies and raw exceptions are not copied into the public report/cache.
 
-## Credentials and limits
+## Reference allowance and credentials
 
-- Platform usage/costs require an **Admin key with `api.usage.read`**. A normal
-  project API key returns HTTP 403.
-- The official prepaid-credit balance endpoint needs a browser session key and
-  expires; this patch deliberately does **not** store or scrape browser
-  sessions. The displayed remaining value is an estimate
-  (`Pro credit - month-to-date cost`), and Platform remains authoritative for
-  the official balance.
-- Never commit a real Admin key. Use a local `config/openai_admin.env` or
-  environment variable; credentials are not printed by `usage_report.py`.
+`OPENAI_PRO_CREDIT` (legacy aliases `OPENAI_MONTHLY_CREDIT` /
+`OPENAI_MONTHLY_BUDGET`) is a locally configured reference amount. Its value
+alone does not establish a grant, renewal time or matching billing cycle.
+The UTC-calendar-month sum cannot establish a Pro billing-cycle balance.
+`reference_difference` is only configured amount minus returned USD costs;
+`remaining` is deliberately null. No reference difference is shown when there
+are no monetary results or the returned currency is not USD.
+
+Admin credentials remain in a private `config/openai_admin.env` or environment.
+No real API calls are required for tests. The optional legacy credit endpoint is
+separate and requires a sensitive browser session key; leave it unconfigured
+unless specifically needed. No credentials or account records belong in patches.

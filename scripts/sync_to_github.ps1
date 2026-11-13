@@ -30,7 +30,7 @@ $names = @(
     "sticker_tag.py", "sticker_feedback.py", "sticker_review.py",
     "memory_search.py", "companion_memory.py", "capture_runtime.py",
     "capture_transcripts.py", "capture_review.py", "whoami.py",
-    "view_session.py", "add_reminder.py", "reminder_admin.py",
+    "view_session.py", "add_reminder.py", "reminder_admin.py", "reminder_send.py",
     "care_scheduler.py", "care_timer_state.py", "reset_agent_threads.py",
     "learn_sticker.py", "healthcheck.py", "backup.ps1", "setup_tasks.ps1",
     "usage_report.py"

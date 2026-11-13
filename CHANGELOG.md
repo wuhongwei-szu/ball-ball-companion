@@ -1,3 +1,10 @@
+## v0.3.1 — 2026-11-14
+
+- Deliver reminders due for the same recipient and minute together. Track each item against the platform response and recover confirmed unsent batches within the delivery window.
+- Retain the source of queued form materials and use the original Word and Excel templates. Distinguish official values, user corrections and estimates.
+- Rotate stickers across the emotion category before applying style preferences. Support explicit style folders for locally curated artwork.
+- Show the UTC billing interval, the last date with a reported cost, and the fetch time. Label the configured credit difference as an estimate.
+
 ## v0.3.0 — 2026-11-13
 
 - Preserve complete WeChat voice attachments alongside existing transcription;

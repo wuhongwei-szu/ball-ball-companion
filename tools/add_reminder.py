@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
 import care_timer_state as state
+import reminder_send
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -37,26 +38,41 @@ def build_prompt(owner, when_text, title, note):
 用 python -X utf8 {c.WORK_DIR}/tools/chat_burst.py {owner} --proactive [--sticker <分类>] "第一句" "第二句" 发送；事情紧急或严肃时不要加表情；本地主动消息安全上限为每位接收者每个本地自然日 4 条、间隔 5 分钟，按语境自然发。没有合适分类就纯文字。最后只回复 NO_REPLY。"""
 
 
-def add_one(owner, when, title, note, items):
+def add_one(owner, when, title, note, items, allow_night=False, urgent=False, text_only=False, sticker_category=None):
     sessions = {"master": c.MASTER_SESSION, "xi": c.XI_SESSION}
     if not sessions.get(owner):
         return None, f"missing {owner} session; no timer process started"
     iso = when.strftime("%Y-%m-%dT%H:%M")
-    when_text = when.strftime("%Y-%m-%d %H:%M")
-    prompt = build_prompt(owner, when_text, title, note)
+    group = reminder_send.group_id(owner, when.strftime('%Y-%m-%d'), when.strftime('%H:%M'))
+    same_time = [item for item in items if item.get('owner') == owner
+                 and item.get('date') == when.strftime('%Y-%m-%d')
+                 and item.get('time') == when.strftime('%H:%M')
+                 and item.get('status') not in {'cancelled','expired','missed'}]
+    if same_time and any(item.get('dispatch_version') != reminder_send.VERSION
+                         or item.get('status') != 'scheduled' or not item.get('id') for item in same_time):
+        return None, 'existing same-time timer requires migration/reconciliation before adding another item'
     item = {
         "owner": owner, "date": when.strftime("%Y-%m-%d"),
         "time": when.strftime("%H:%M"), "title": title, "note": note,
         "created_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "status": "creating",
+        "dispatch_version": reminder_send.VERSION, "dispatch_group": group,
+        "allow_night": bool(allow_night),
+        "urgent":bool(urgent), "text_only":bool(text_only),
+        "sticker_category":sticker_category,
     }
+    if same_time:
+        item.update(id=same_time[0]['id'], status='scheduled')
+        items.append(item)
+        save_index(items)
+        return item['id'], 'item merged into existing same-recipient/time dispatcher'
     items.append(item)
     save_index(items)
     try:
         timer_id, output = state.add_timer([
             "timer", "add", "--at", iso, "-p", c.PROJECT,
-            "-s", sessions[owner], "--prompt", prompt, "--desc", title,
-            "--session-mode", "new_per_run", "--timeout-mins", "30",
+            "-s", sessions[owner], "--exec", reminder_send.command(owner, item['date'], item['time']),
+            "--desc", title, "--mute", "--timeout-mins", "5",
         ])
     except state.NotStarted:
         # A process was never started, so this recipient may safely retry.
@@ -79,6 +95,9 @@ def main():
     parser.add_argument("--time", required=True, help="HH:MM")
     parser.add_argument("--title", required=True)
     parser.add_argument("--note", default="")
+    parser.add_argument('--urgent',action='store_true',help='serious/urgent reminder: text only')
+    parser.add_argument('--text-only',action='store_true',help='explicitly omit the optional reminder sticker')
+    parser.add_argument('--sticker',default=None,help='optional local category; ordinary reminders default to work')
     parser.add_argument("--allow-night", action="store_true",
                         help="Allow a reminder during 23:00-07:00")
     args = parser.parse_args()
@@ -125,7 +144,8 @@ def create_missing(args, when, owners):
 
     created = []
     for owner in pending:
-        timer_id, output = add_one(owner, when, args.title, args.note, items)
+        timer_id, output = add_one(owner, when, args.title, args.note, items, args.allow_night,
+                                  args.urgent,args.text_only,args.sticker)
         if not timer_id:
             print(f"记录失败（{owner}）：{output}")
             failed = True

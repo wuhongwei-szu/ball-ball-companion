@@ -1,0 +1,770 @@
+--- a/core/engine.go
++++ b/core/engine.go
+@@ -515,6 +515,8 @@
+ 	msgSessionKey     string // session key for extracting chat ID
+ 	channelKey        string // platform-provided channel identifier (preferred over sessionKey extraction)
+ 	userMessageTimeMs int64  // Feishu create_time ms (optional); see Message.UserMessageTimeMs
++	material          bool
++	materialParts     []queuedMessage // separate source records for a same-identity batch
+ }
+ 
+ // interactiveState tracks a running interactive agent session and its permission state.
+@@ -534,8 +536,9 @@
+ 	stopped                  bool
+ 	pending                  *pendingPermission
+ 	pendingMessages          []queuedMessage // messages queued while session was busy
+-	approveAll               bool            // when true, auto-approve all permission requests for this session
+-	fromVoice                bool            // true if current turn originated from voice transcription
++	currentMaterialIdentity  string
++	approveAll               bool // when true, auto-approve all permission requests for this session
++	fromVoice                bool // true if current turn originated from voice transcription
+ 	sideText                 string
+ 	deleteMode               *deleteModeState
+ 	modelSwitch              *modelSwitchState
+@@ -2562,11 +2565,14 @@
+ 		filtered := pending[:0]
+ 		removed := false
+ 		for _, queued := range pending {
+-			if queued.messageID == messageID {
++			updated, recalled, empty := removeMaterialPart(queued, messageID)
++			if recalled {
+ 				removed = true
+-				continue
+-			}
+-			filtered = append(filtered, queued)
++				if empty {
++					continue
++				}
++			}
++			filtered = append(filtered, updated)
+ 		}
+ 		if removed {
+ 			state.pendingMessages = filtered
+@@ -2642,7 +2648,7 @@
+ // for this interactive session (e.g. Feishu redelivery with a new message_id
+ // but an older create_time).
+ func (e *Engine) discardStaleUserMessageIfNeeded(interactiveKey string, msg *Message) bool {
+-	if msg == nil || msg.UserMessageTimeMs <= 0 {
++	if msg == nil || msg.UserMessageTimeMs <= 0 || msg.materialInput || isMaterialInput(msg) {
+ 		return false
+ 	}
+ 	e.interactiveMu.Lock()
+@@ -2995,6 +3001,7 @@
+ 		return
+ 	}
+ 
++	e.classifyMaterialInput(interactiveKey, p, msg)
+ 	if e.discardStaleUserMessageIfNeeded(interactiveKey, msg) {
+ 		return
+ 	}
+@@ -3045,6 +3052,7 @@
+ 	// reset because cleanupInteractiveState may remove the early placeholder.
+ 	e.ensureInteractiveStateForQueueing(interactiveKey, p, msg.ReplyCtx)
+ 	e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
++	e.noteMaterialTurn(interactiveKey, p, msg)
+ 	runMessageAccepted(msg)
+ 	slog.Debug("user message accepted for processing",
+ 		"platform", msg.Platform,
+@@ -3158,32 +3166,33 @@
+ 	// current turn, causing the event loop to hang waiting for a second
+ 	// EventResult that never arrives. Instead, the event loop sends the
+ 	// message after the current turn's EventResult is received.
+-	if e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
++	material := msg.materialInput || materialInputLocked(state, p, msg)
++	if !material && e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
+ 		snap := userMessageWatermarkSnapshotLocked(state)
+ 		e.logStaleUserMessageDropped("reject_before_queue", msg, interactiveKey, snap)
+ 		return true
+ 	}
+-	if len(state.pendingMessages) >= e.maxQueuedMessages {
++	if !material && len(state.pendingMessages) >= e.maxQueuedMessages {
+ 		depth := len(state.pendingMessages)
+ 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgQueueFull), depth))
+ 		return true // handled: queue-full reply sent
+ 	}
+-	state.pendingMessages = append(state.pendingMessages, queuedMessage{
+-		messageID:         msg.MessageID,
+-		platform:          p,
+-		replyCtx:          msg.ReplyCtx,
+-		content:           msg.Content,
+-		sourceUserContent: msg.SourceUserContent,
+-		images:            msg.Images,
+-		files:             msg.Files,
+-		fromVoice:         msg.FromVoice,
+-		userID:            msg.UserID,
+-		userName:          msg.UserName,
+-		msgPlatform:       msg.Platform,
+-		msgSessionKey:     msg.SessionKey,
+-		channelKey:        msg.ChannelKey,
+-		userMessageTimeMs: msg.UserMessageTimeMs,
+-	})
++	queued := e.queuedMaterial(p, msg, state, material)
++	merged := false
++	identity := materialIdentity(p, msg.SessionKey, msg.UserID)
++	if material && identity != "" {
++		for i := range state.pendingMessages {
++			previous := state.pendingMessages[i]
++			if previous.material && materialIdentity(previous.platform, previous.msgSessionKey, previous.userID) == identity {
++				state.pendingMessages[i] = mergeMaterialMessages(previous, queued)
++				merged = true
++				break
++			}
++		}
++	}
++	if !merged {
++		state.pendingMessages = append(state.pendingMessages, queued)
++	}
+ 	runMessageAccepted(msg)
+ 	queueDepth := len(state.pendingMessages)
+ 
+@@ -3740,6 +3749,10 @@
+ 	state.replyCtx = msg.ReplyCtx
+ 	state.currentMessageID = msg.MessageID
+ 	state.currentTurnUserMessageTimeMs = msg.UserMessageTimeMs
++	state.currentMaterialIdentity = ""
++	if msg.materialInput {
++		state.currentMaterialIdentity = materialIdentity(p, msg.SessionKey, msg.UserID)
++	}
+ 	state.mu.Unlock()
+ 	stopRecallMonitor := e.startMessageRecallMonitor(interactiveKey)
+ 	defer stopRecallMonitor()
+@@ -3987,6 +4000,7 @@
+ 		return
+ 	}
+ 	existing.mu.Lock()
++	newState.currentMaterialIdentity = existing.currentMaterialIdentity
+ 	if len(existing.pendingMessages) > 0 {
+ 		newState.pendingMessages = existing.pendingMessages
+ 		existing.pendingMessages = nil
+@@ -5883,7 +5897,7 @@
+ 			// for the next turn instead of returning.
+ 			state.mu.Lock()
+ 			droppedStale := 0
+-			for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
++			for len(state.pendingMessages) > 0 && !state.pendingMessages[0].material && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
+ 				state.pendingMessages = state.pendingMessages[1:]
+ 				droppedStale++
+ 			}
+@@ -5893,6 +5907,7 @@
+ 					"dropped", droppedStale,
+ 				)
+ 			}
++			state.currentMaterialIdentity = ""
+ 			if len(state.pendingMessages) > 0 {
+ 				queued := state.pendingMessages[0]
+ 				state.pendingMessages = state.pendingMessages[1:]
+@@ -5902,6 +5917,9 @@
+ 				state.currentMessageID = queued.messageID
+ 				state.fromVoice = queued.fromVoice
+ 				state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
++				if queued.material {
++					state.currentMaterialIdentity = materialIdentity(queued.platform, queued.msgSessionKey, queued.userID)
++				}
+ 				state.mu.Unlock()
+ 
+ 				// Stop the previous turn's typing indicator
+@@ -5928,7 +5946,7 @@
+ 				}
+ 
+ 				queuedPrompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey)
+-				queuedPrompt = e.appendCompanionMemory(queuedPrompt, queued.platform, queued.msgSessionKey, queued.userID, queued.messageID, queued.sourceUserContent)
++				queuedPrompt = e.appendQueuedCompanionMemory(queuedPrompt, queued)
+ 
+ 				state.mu.Lock()
+ 				as := state.agentSession // capture under lock to avoid race with cleanup
+@@ -6222,7 +6240,7 @@
+ 			return true
+ 		}
+ 		droppedStale := 0
+-		for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
++		for len(state.pendingMessages) > 0 && !state.pendingMessages[0].material && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
+ 			state.pendingMessages = state.pendingMessages[1:]
+ 			droppedStale++
+ 		}
+@@ -6244,11 +6262,15 @@
+ 		state.currentMessageID = queued.messageID
+ 		state.fromVoice = queued.fromVoice
+ 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
++		state.currentMaterialIdentity = ""
++		if queued.material {
++			state.currentMaterialIdentity = materialIdentity(queued.platform, queued.msgSessionKey, queued.userID)
++		}
+ 		state.mu.Unlock()
+ 
+ 		e.i18n.DetectAndSet(queued.content)
+ 		prompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey)
+-		prompt = e.appendCompanionMemory(prompt, queued.platform, queued.msgSessionKey, queued.userID, queued.messageID, queued.sourceUserContent)
++		prompt = e.appendQueuedCompanionMemory(prompt, queued)
+ 
+ 		state.mu.Lock()
+ 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)
+--- a/core/message.go
++++ b/core/message.go
+@@ -361,15 +361,16 @@
+ 
+ // Message represents a unified incoming message from any platform.
+ type Message struct {
+-	SessionKey string // unique key for user context, e.g. "feishu:{chatID}:{userID}"
+-	Platform   string
+-	MessageID  string // platform message ID for tracing
+-	Recalled   bool   // true for platform message recall/delete events targeting MessageID
+-	ChannelID  string
+-	UserID     string
+-	UserName   string
+-	ChatName   string // human-readable chat/group name (optional)
+-	Content    string
++	materialInput bool   // engine-only classification; never authenticated user text
++	SessionKey    string // unique key for user context, e.g. "feishu:{chatID}:{userID}"
++	Platform      string
++	MessageID     string // platform message ID for tracing
++	Recalled      bool   // true for platform message recall/delete events targeting MessageID
++	ChannelID     string
++	UserID        string
++	UserName      string
++	ChatName      string // human-readable chat/group name (optional)
++	Content       string
+ 	// SourceUserContent is captured by the platform before custom-command expansion.
+ 	// Empty means no authenticated source text is available to memory.
+ 	SourceUserContent string
+--- a/core/i18n.go
++++ b/core/i18n.go
+@@ -174,6 +174,7 @@
+ 	MsgPreviousProcessing        MsgKey = "previous_processing"
+ 	MsgQueueFull                 MsgKey = "queue_full"
+ 	MsgMessageQueued             MsgKey = "message_queued"
++	MsgMaterialStorageIncomplete MsgKey = "material_storage_incomplete"
+ 	MsgNoToolsAllowed            MsgKey = "no_tools_allowed"
+ 	MsgCurrentTools              MsgKey = "current_tools"
+ 	MsgCurrentSession            MsgKey = "current_session"
+@@ -751,6 +752,13 @@
+ 		LangTraditionalChinese: "📬 訊息佇列已滿（%d 則待處理）。請等待目前任務完成。",
+ 		LangJapanese:           "📬 メッセージキューが満杯です（%d 件待ち）。現在のタスク完了をお待ちください。",
+ 		LangSpanish:            "📬 La cola de mensajes está llena (%d pendientes). Espere a que las tareas actuales se completen.",
++	},
++	MsgMaterialStorageIncomplete: {
++		LangEnglish:            "Materials are queued, but some originals could not be saved yet. Saving will be retried during processing; please keep the originals.",
++		LangChinese:            "材料已排队，但原件暂存未全部成功，处理时会重试；请保留原件。",
++		LangTraditionalChinese: "材料已排隊，但原件暫存未全部成功，處理時會重試；請保留原件。",
++		LangJapanese:           "資料を待ち行列に追加しましたが、一部の原本をまだ保存できません。処理時に再試行するため、原本を保管してください。",
++		LangSpanish:            "Los materiales están en cola, pero algunos originales aún no se pudieron guardar. Se reintentará al procesarlos; conserve los originales.",
+ 	},
+ 	MsgNoToolsAllowed: {
+ 		LangEnglish:            "No tools pre-allowed.\nUsage: `/allow <tool_name>`\nExample: `/allow Bash`",
+--- a/core/cuj_test.go
++++ b/core/cuj_test.go
+@@ -45,6 +45,47 @@
+ // agent "replies" for each user prompt, without bringing up a real LLM.
+ // ---------------------------------------------------------------------------
+ 
++// Full queue, out-of-order uploads, and a final instruction must reach the
++// next agent turn together, without another user action to resume the queue.
++// The mock agent echoes its input so assertions inspect the user-visible reply.
++func TestCUJ_M1_ContinuousMaterialsSurviveBusyQueue(t *testing.T) {
++	env := newCUJEnv(t)
++	e := env.engine
++	e.baseWorkDir = env.tempDir
++	e.maxQueuedMessages = 1
++	sess := newQueuingSession("cuj-materials")
++	e.agent = &controllableAgent{nextSession: sess}
++	key := "test:student"
++	send := func(id, body string, at int64, files ...FileAttachment) {
++		e.ReceiveMessage(env.plat, &Message{SessionKey: key, Platform: "test", UserID: "student", UserName: "student", MessageID: id, Content: body, SourceUserContent: body, UserMessageTimeMs: at, Files: files, ReplyCtx: "ctx"})
++	}
++	waitSend := func(n int) string {
++		env.waitFor("next input delivered", 5*time.Second, func() bool { sess.sendMu.Lock(); defer sess.sendMu.Unlock(); return len(sess.sendCalls) >= n })
++		sess.sendMu.Lock()
++		defer sess.sendMu.Unlock()
++		return sess.sendCalls[n-1]
++	}
++	send("first", "先处理前一件事", 900)
++	waitSend(1)
++	send("chat", "普通聊天先排着", 0)
++	send("notice", "学校通知：使用原申请表", 100)
++	send("zip", "压缩包在这里", 99, FileAttachment{FileName: "materials.zip", Data: []byte("zip-original")})
++	send("forms", "原Word和Excel", 98, FileAttachment{FileName: "application.docx", Data: []byte("word-original")}, FileAttachment{FileName: "application.xlsx", Data: []byte("excel-original")})
++	send("grades", "最终成绩90，发完了，先填", 97)
++	sess.events <- Event{Type: EventResult, Content: "前一件事已处理", Done: true}
++	waitSend(2)
++	sess.events <- Event{Type: EventResult, Content: "普通聊天已回复", Done: true}
++	batch := waitSend(3)
++	sess.events <- Event{Type: EventResult, Content: "本批收到：" + batch, Done: true}
++	env.waitFor("complete material receipt visible", 5*time.Second, func() bool { return strings.Contains(strings.Join(env.plat.getSent(), "\n"), "本批收到：") })
++	visible := strings.Join(env.plat.getSent(), "\n")
++	for _, want := range []string{"学校通知：使用原申请表", "materials.zip", "application.docx", "application.xlsx", "最终成绩90，发完了，先填"} {
++		if !strings.Contains(visible, want) {
++			t.Fatalf("user-visible receipt lost %q", want)
++		}
++	}
++}
++
+ // cujAgent is a controllable Agent that returns a configurable AgentSession
+ // per StartSession call. Tests can mutate cujAgentSession.reply between
+ // turns to simulate different agent responses.
+--- /dev/null
++++ b/core/material_intake.go
+@@ -0,0 +1,194 @@
++package core
++
++// Material intake uses the existing busy-session queue and attachment store.
++// It never waits before an idle chat turn or forwards input to a running agent.
++import (
++	"encoding/json"
++	"log/slog"
++	"strings"
++)
++
++func materialIdentity(p Platform, sessionKey, userID string) string {
++	if p == nil || sessionKey == "" || userID == "" {
++		return ""
++	}
++	return strings.Join([]string{p.Name(), PlatformAccountID(p), sessionKey, userID}, "\x00")
++}
++
++func isMaterialInput(msg *Message) bool {
++	if len(msg.Images) > 0 {
++		return true
++	}
++	for _, file := range msg.Files {
++		if !strings.HasPrefix(strings.ToLower(file.MimeType), "audio/") {
++			return true
++		}
++	}
++	text := strings.ToLower(msg.Content)
++	for _, word := range []string{"材料", "通知", "表格", "压缩包", "成绩", "绩点", "填表", "申请表", "发完了", "先填", "可以填", "收齐了", ".doc", ".xls", ".zip"} {
++		if strings.Contains(text, word) {
++			return true
++		}
++	}
++	return false
++}
++
++// Caller holds state.mu. Context extends only the current/queued material turn
++// for the exact configured account, conversation and authenticated sender.
++func materialInputLocked(state *interactiveState, p Platform, msg *Message) bool {
++	if isMaterialInput(msg) {
++		return true
++	}
++	identity := materialIdentity(p, msg.SessionKey, msg.UserID)
++	if identity == "" {
++		return false
++	}
++	if state.currentMaterialIdentity == identity {
++		return true
++	}
++	for _, queued := range state.pendingMessages {
++		if queued.material && materialIdentity(queued.platform, queued.msgSessionKey, queued.userID) == identity {
++			return true
++		}
++	}
++	return false
++}
++
++func (e *Engine) classifyMaterialInput(key string, p Platform, msg *Message) {
++	msg.materialInput = isMaterialInput(msg)
++	e.interactiveMu.Lock()
++	state := e.interactiveStates[key]
++	e.interactiveMu.Unlock()
++	if state != nil {
++		state.mu.Lock()
++		msg.materialInput = materialInputLocked(state, p, msg)
++		state.mu.Unlock()
++	}
++}
++
++func (e *Engine) noteMaterialTurn(key string, p Platform, msg *Message) {
++	e.interactiveMu.Lock()
++	state := e.interactiveStates[key]
++	e.interactiveMu.Unlock()
++	if state == nil {
++		return
++	}
++	state.mu.Lock()
++	state.currentMaterialIdentity = ""
++	if msg.materialInput {
++		state.currentMaterialIdentity = materialIdentity(p, msg.SessionKey, msg.UserID)
++	}
++	state.mu.Unlock()
++}
++
++func (e *Engine) queuedMaterial(p Platform, msg *Message, state *interactiveState, material bool) queuedMessage {
++	queued := queuedMessage{
++		messageID: msg.MessageID, platform: p, replyCtx: msg.ReplyCtx,
++		content: msg.Content, sourceUserContent: msg.SourceUserContent,
++		images: msg.Images, files: msg.Files, fromVoice: msg.FromVoice,
++		userID: msg.UserID, userName: msg.UserName, msgPlatform: msg.Platform,
++		msgSessionKey: msg.SessionKey, channelKey: msg.ChannelKey,
++		userMessageTimeMs: msg.UserMessageTimeMs, material: material,
++	}
++	if !material {
++		return queued
++	}
++	workDir := state.workspaceDir
++	if workDir == "" {
++		workDir = e.currentSendWorkDir()
++	}
++	// Keep image inputs for native vision, but also retain their original bytes.
++	attachments := append([]FileAttachment(nil), msg.Files...)
++	for _, image := range msg.Images {
++		attachments = append(attachments, FileAttachment{MimeType: image.MimeType, FileName: image.FileName, Data: image.Data})
++	}
++	paths := SaveFilesToDisk(workDir, msg.MessageID, attachments)
++	if len(paths) == len(attachments) {
++		queued.content = AppendFileRefs(queued.content, paths)
++		// Keep FileAttachment inputs too: remote/native backends may require
++		// the original bytes rather than access to this process's local paths.
++	} else {
++		// Failed storage must neither acknowledge a durable receipt nor lose bytes.
++		// Retain all original inputs for the normal agent save path to retry.
++		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMaterialStorageIncomplete))
++		slog.Warn("material receipt incomplete", "saved_count", len(paths), "attachment_count", len(attachments))
++	}
++	// A local receipt preserves separate authenticated sources even though the
++	// model receives one batch. Never put the synthetic batch into user memory.
++	receipt, _ := json.Marshal(struct {
++		Account string   `json:"account"`
++		Session string   `json:"session_key"`
++		User    string   `json:"user_id"`
++		Message string   `json:"message_id"`
++		Text    string   `json:"text"`
++		Files   []string `json:"files"`
++	}{PlatformAccountID(p), msg.SessionKey, msg.UserID, msg.MessageID, msg.SourceUserContent, paths})
++	if len(SaveFilesToDisk(workDir, msg.MessageID, []FileAttachment{{FileName: "material-receipt.json", Data: receipt}})) != 1 {
++		slog.Warn("material source receipt unavailable")
++	}
++	return queued
++}
++
++func materialParts(queued queuedMessage) []queuedMessage {
++	if len(queued.materialParts) > 0 {
++		return queued.materialParts
++	}
++	return []queuedMessage{queued}
++}
++
++func mergeMaterialMessages(first, next queuedMessage) queuedMessage {
++	parts := append(append([]queuedMessage(nil), materialParts(first)...), materialParts(next)...)
++	combined := next
++	combined.material = true
++	combined.materialParts = parts
++	combined.images, combined.files = nil, nil
++	var body strings.Builder
++	body.WriteString("【系统材料批次：以下是同一账号、会话、发件人连续发送的独立消息，请合并核对全部文字与原附件。消息按到达顺序列出，时间先后不代表材料有效性；已有材料不要重复索要。】")
++	for _, part := range parts {
++		body.WriteString("\n\n【独立消息】\n")
++		body.WriteString(part.content)
++		combined.images = append(combined.images, part.images...)
++		combined.files = append(combined.files, part.files...)
++		if part.userMessageTimeMs > combined.userMessageTimeMs {
++			combined.userMessageTimeMs = part.userMessageTimeMs
++		}
++	}
++	combined.content = body.String()
++	return combined
++}
++
++func (e *Engine) appendQueuedCompanionMemory(prompt string, queued queuedMessage) string {
++	withMemory := prompt
++	for _, part := range materialParts(queued) {
++		// Record each source once, but keep only the newest retrieval packet.
++		// Nesting packets would repeat the same memory for every attachment.
++		withMemory = e.appendCompanionMemory(prompt, part.platform, part.msgSessionKey, part.userID, part.messageID, part.sourceUserContent)
++	}
++	return withMemory
++}
++
++func removeMaterialPart(queued queuedMessage, messageID string) (queuedMessage, bool, bool) {
++	if len(queued.materialParts) == 0 {
++		return queued, queued.messageID == messageID, queued.messageID == messageID
++	}
++	var retained []queuedMessage
++	removed := false
++	for _, part := range queued.materialParts {
++		if part.messageID == messageID {
++			removed = true
++		} else {
++			retained = append(retained, part)
++		}
++	}
++	if !removed {
++		return queued, false, false
++	}
++	if len(retained) == 0 {
++		return queued, true, true
++	}
++	rebuilt := retained[0]
++	for _, part := range retained[1:] {
++		rebuilt = mergeMaterialMessages(rebuilt, part)
++	}
++	return rebuilt, true, false
++}
+--- /dev/null
++++ b/core/material_intake_test.go
+@@ -0,0 +1,268 @@
++package core
++
++import (
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestHandleMessageKeepsOutOfOrderMaterialWhileBusy(t *testing.T) {
++	p := &stubPlatformEngine{n: "test"}
++	e := newTestEngine()
++	e.baseWorkDir = t.TempDir()
++	key := "test:material"
++	session := e.sessions.GetOrCreateActive(key)
++	if !session.TryLock() {
++		t.Fatal("lock")
++	}
++	defer session.Unlock()
++	state := &interactiveState{platform: p, currentTurnUserMessageTimeMs: 500}
++	e.interactiveStates[key] = state
++	accepted := false
++	e.handleMessage(p, &Message{SessionKey: key, Platform: "test", UserID: "student", MessageID: "old-upload", Content: "学校通知", SourceUserContent: "学校通知", UserMessageTimeMs: 100, Files: []FileAttachment{{FileName: "notice.zip", Data: []byte("complete-original")}}, OnAccepted: func() { accepted = true }})
++	if !accepted || len(state.pendingMessages) != 1 {
++		t.Fatalf("out-of-order material lost: accepted=%v queued=%d", accepted, len(state.pendingMessages))
++	}
++	found := false
++	_ = filepath.WalkDir(filepath.Join(e.baseWorkDir, ".cc-connect", "attachments"), func(path string, d os.DirEntry, err error) error {
++		if err == nil && !d.IsDir() {
++			b, _ := os.ReadFile(path)
++			if string(b) == "complete-original" {
++				found = true
++			}
++		}
++		return nil
++	})
++	if !found {
++		t.Fatal("queued material was not saved before agent.Send")
++	}
++}
++
++type materialAccountPlatform struct {
++	*stubPlatformEngine
++	account string
++}
++
++func (p *materialAccountPlatform) PlatformAccountID() string { return p.account }
++
++func TestMaterialBatchDoesNotCrossAccountOrSession(t *testing.T) {
++	e := newTestEngine()
++	e.baseWorkDir = t.TempDir()
++	key := "shared-interactive-key"
++	e.interactiveStates[key] = &interactiveState{}
++	for i, input := range []struct{ account, session string }{{"one", "chat-one"}, {"two", "chat-one"}, {"one", "chat-two"}} {
++		p := &materialAccountPlatform{&stubPlatformEngine{n: "test"}, input.account}
++		e.queueMessageForBusySession(p, &Message{SessionKey: input.session, UserID: "same-user", MessageID: []string{"a", "b", "c"}[i], Content: "学校通知"}, key)
++	}
++	if n := len(e.interactiveStates[key].pendingMessages); n != 3 {
++		t.Fatalf("different account/session merged: %d", n)
++	}
++}
++
++func TestMaterialBatchDrainDeliversAllOriginalsAndSources(t *testing.T) {
++	p := &stubPlatformEngine{n: "test"}
++	sess := newQueuingSession("material-drain")
++	e := NewEngine("test", &controllableAgent{nextSession: sess}, []Platform{p}, "", LangEnglish)
++	e.baseWorkDir = t.TempDir()
++	key := "test:material"
++	session := e.sessions.GetOrCreateActive(key)
++	state := &interactiveState{agentSession: sess, platform: p, currentTurnUserMessageTimeMs: 900, lastCompletedUserMessageTimeMs: 800}
++	e.interactiveStates[key] = state
++	texts := []string{"学校通知：这是申请条件", "压缩包附件", "原Word与Excel表格", "最终成绩：90；发完了，先填"}
++	for i, text := range texts {
++		msg := &Message{SessionKey: key, Platform: "test", UserID: "student", MessageID: []string{"notice", "archive", "forms", "scores"}[i], Content: text, SourceUserContent: text, UserMessageTimeMs: int64(100 - i)}
++		switch i {
++		case 1:
++			msg.Files = []FileAttachment{{FileName: "materials.zip", Data: []byte("all-archive-bytes")}}
++		case 2:
++			msg.Files = []FileAttachment{{FileName: "form.docx", Data: []byte("all-word-bytes")}, {FileName: "form.xlsx", Data: []byte("all-excel-bytes")}}
++		}
++		e.queueMessageForBusySession(p, msg, key)
++	}
++	if len(state.pendingMessages) != 1 {
++		t.Fatalf("batch depth=%d", len(state.pendingMessages))
++	}
++	batch := state.pendingMessages[0]
++	if len(batch.files) != 3 {
++		t.Fatalf("native file inputs dropped: got %d, want 3", len(batch.files))
++	}
++	if len(batch.materialParts) != 4 {
++		t.Fatalf("source count=%d", len(batch.materialParts))
++	}
++	for i, part := range batch.materialParts {
++		if part.sourceUserContent != texts[i] {
++			t.Fatal("source text rewritten")
++		}
++	}
++	seen := map[string]bool{}
++	receipts := 0
++	_ = filepath.WalkDir(filepath.Join(e.baseWorkDir, ".cc-connect", "attachments"), func(path string, d os.DirEntry, err error) error {
++		if err != nil || d.IsDir() {
++			return nil
++		}
++		b, _ := os.ReadFile(path)
++		if strings.Contains(d.Name(), "material-receipt") {
++			var receipt struct {
++				Text string `json:"text"`
++			}
++			if json.Unmarshal(b, &receipt) != nil {
++				t.Fatal("receipt json")
++			}
++			for _, text := range texts {
++				if receipt.Text == text {
++					receipts++
++				}
++			}
++		} else {
++			seen[string(b)] = true
++		}
++		return nil
++	})
++	for _, raw := range []string{"all-archive-bytes", "all-word-bytes", "all-excel-bytes"} {
++		if !seen[raw] {
++			t.Fatalf("missing complete original %s", raw)
++		}
++	}
++	if receipts != 4 {
++		t.Fatalf("raw source receipts=%d", receipts)
++	}
++	done := make(chan struct{})
++	go func() { e.drainPendingMessages(state, session, e.sessions, key); close(done) }()
++	deadline := time.After(5 * time.Second)
++	for {
++		sess.sendMu.Lock()
++		n := len(sess.sendCalls)
++		var prompt string
++		if n > 0 {
++			prompt = sess.sendCalls[0]
++		}
++		sess.sendMu.Unlock()
++		if n > 0 {
++			for _, want := range append(texts, "materials.zip", "form.docx", "form.xlsx") {
++				if !strings.Contains(prompt, want) {
++					t.Fatalf("agent missing %q", want)
++				}
++			}
++			sess.events <- Event{Type: EventResult, Content: "done", Done: true}
++			break
++		}
++		select {
++		case <-deadline:
++			t.Fatal("material did not automatically drain")
++		case <-time.After(5 * time.Millisecond):
++		}
++	}
++	select {
++	case <-done:
++	case <-time.After(5 * time.Second):
++		t.Fatal("drain did not finish")
++	}
++}
++
++func TestMaterialSaveFailureRetainsRawBytes(t *testing.T) {
++	e := newTestEngine()
++	e.i18n = NewI18n(LangChinese)
++	e.baseWorkDir = t.TempDir()
++	if err := os.WriteFile(filepath.Join(e.baseWorkDir, ".cc-connect"), []byte("blocks directory"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	p := &stubPlatformEngine{n: "test"}
++	state := &interactiveState{}
++	e.interactiveStates["test:failure"] = state
++	e.queueMessageForBusySession(p, &Message{SessionKey: "test:failure", UserID: "student", MessageID: "file", Files: []FileAttachment{{FileName: "form.xlsx", Data: []byte("do-not-drop")}}}, "test:failure")
++	if len(state.pendingMessages) != 1 || len(state.pendingMessages[0].files) != 1 || string(state.pendingMessages[0].files[0].Data) != "do-not-drop" {
++		t.Fatal("disk failure dropped the only copy")
++	}
++	if !strings.Contains(strings.Join(p.getSent(), "\n"), "暂存未全部成功") {
++		t.Fatal("storage failure was silent")
++	}
++}
++
++func TestMaterialRecallRemovesOnlyRecalledSource(t *testing.T) {
++	q := mergeMaterialMessages(queuedMessage{messageID: "first", content: "first original", material: true}, queuedMessage{messageID: "second", content: "second original", material: true})
++	got, removed, empty := removeMaterialPart(q, "first")
++	if !removed || empty || strings.Contains(got.content, "first original") || !strings.Contains(got.content, "second original") {
++		t.Fatal("recall removed the whole batch or retained recalled content")
++	}
++}
++
++func TestCompletedTurnDrainsOlderMaterialBatch(t *testing.T) {
++	p := &stubPlatformEngine{n: "test"}
++	sess := newQueuingSession("material-event-drain")
++	e := NewEngine("test", &controllableAgent{nextSession: sess}, []Platform{p}, "", LangEnglish)
++	e.baseWorkDir = t.TempDir()
++	key := "test:events"
++	session := e.sessions.GetOrCreateActive(key)
++	state := &interactiveState{agentSession: sess, platform: p, currentTurnUserMessageTimeMs: 900}
++	e.interactiveStates[key] = state
++	e.queueMessageForBusySession(p, &Message{SessionKey: key, UserID: "student", MessageID: "old-material", Content: "旧时间戳的完整材料，先填", UserMessageTimeMs: 100}, key)
++	sendDone := make(chan error, 1)
++	sendDone <- nil
++	done := make(chan struct{})
++	go func() {
++		e.processInteractiveEvents(state, session, e.sessions, key, "first", time.Now(), nil, sendDone, nil)
++		close(done)
++	}()
++	sess.events <- Event{Type: EventResult, Content: "previous done", Done: true}
++	deadline := time.After(5 * time.Second)
++	for {
++		sess.sendMu.Lock()
++		n := len(sess.sendCalls)
++		sess.sendMu.Unlock()
++		if n > 0 {
++			sess.events <- Event{Type: EventResult, Content: "material done", Done: true}
++			break
++		}
++		select {
++		case <-deadline:
++			t.Fatal("completed-turn drain dropped older material")
++		case <-time.After(5 * time.Millisecond):
++		}
++	}
++	select {
++	case <-done:
++	case <-time.After(5 * time.Second):
++		t.Fatal("event loop did not finish")
++	}
++}
++
++func TestBusyMaterialBatchSurvivesFullQueueAndKeepsIdentity(t *testing.T) {
++	p := &stubPlatformEngine{n: "test"}
++	e := newTestEngine()
++	e.baseWorkDir = t.TempDir()
++	e.maxQueuedMessages = 1
++	key := "test:material"
++	state := &interactiveState{platform: p, pendingMessages: []queuedMessage{{content: "ordinary existing chat"}}}
++	e.interactiveStates[key] = state
++	for i, content := range []string{"先发通知，材料还没齐", "这是成绩表", "发完了，先填"} {
++		msg := &Message{SessionKey: key, Platform: "test", UserID: "student", MessageID: []string{"notice", "sheet", "done"}[i], Content: content, SourceUserContent: content}
++		if i == 1 {
++			msg.Files = []FileAttachment{{FileName: "original.xlsx", Data: []byte("original-spreadsheet")}}
++		}
++		accepted := false
++		msg.OnAccepted = func() { accepted = true }
++		if !e.queueMessageForBusySession(p, msg, key) || !accepted {
++			t.Fatalf("material %d rejected at full queue", i)
++		}
++	}
++	if len(state.pendingMessages) != 2 {
++		t.Fatalf("expected one chat and one material batch, got %d", len(state.pendingMessages))
++	}
++	combined := state.pendingMessages[1].content
++	for _, want := range []string{"先发通知", "这是成绩表", "发完了"} {
++		if !strings.Contains(combined, want) {
++			t.Fatalf("batch missing %q: %s", want, combined)
++		}
++	}
++	other := &Message{SessionKey: key, Platform: "test", UserID: "other-student", MessageID: "other", Content: "我的成绩表", SourceUserContent: "我的成绩表"}
++	e.queueMessageForBusySession(p, other, key)
++	if len(state.pendingMessages) != 3 {
++		t.Fatal("different senders were merged")
++	}
++	if strings.Contains(state.pendingMessages[1].content, "我的成绩表") {
++		t.Fatal("another sender entered the batch")
++	}
++}

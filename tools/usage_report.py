@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report ChatGPT subscription usage plus OpenAI Platform API spend/budget.
+"""Report subscription usage and UTC-month costs actually returned by Platform.
 
 Why this exists:
 - cc-connect's `/usage` calls the ChatGPT OAuth endpoint
@@ -21,10 +21,13 @@ Usage:
 """
 import argparse
 import datetime
+from decimal import Decimal
 import json
+import math
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -138,30 +141,92 @@ def fetch_chatgpt_usage():
     }
 
 
-def fetch_platform_costs(admin_key):
-    now = datetime.datetime.now().astimezone()
-    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    url = (ORG_COSTS_URL + "?start_time=%d&end_time=%d&bucket_width=1d&limit=31"
-           % (int(start.timestamp()), int(now.timestamp())))
+def fetch_platform_costs(admin_key, now=None):
+    """Sum returned daily costs in the UTC calendar month, across every page.
+
+    An empty bucket is not evidence that its day's bill is complete. The last
+    bucket containing a numeric amount is reported separately from fetch time.
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        return {"error": "Platform costs requires an aware query time"}
+    now = now.astimezone(datetime.timezone.utc).replace(microsecond=0)
+    start = now.replace(day=1, hour=0, minute=0, second=0)
+    params = {"start_time": int(start.timestamp()), "end_time": int(now.timestamp()),
+              "bucket_width": "1d", "limit": 31}
+    total = Decimal(0)
+    currency = None
+    seen_buckets, seen_pages = {}, set()
+    dates, cost_dates = [], []
+    empty = excluded = pages = 0
     try:
-        payload = _request_json(url, {"Authorization": "Bearer " + admin_key})
+        while True:
+            pages += 1
+            if pages > 100:
+                raise ValueError("pagination_limit")
+            payload = _request_json(ORG_COSTS_URL + "?" + urllib.parse.urlencode(params),
+                                    {"Authorization": "Bearer " + admin_key})
+            if (not isinstance(payload, dict) or not isinstance(payload.get("data"), list)
+                    or type(payload.get("has_more")) is not bool):
+                raise ValueError("invalid_page")
+            for bucket in payload["data"]:
+                lo, hi = bucket.get("start_time"), bucket.get("end_time")
+                if type(lo) is not int or type(hi) is not int or hi <= lo:
+                    raise ValueError("invalid_bucket")
+                if lo < params["start_time"] or lo >= params["end_time"]:
+                    excluded += 1
+                    continue
+                key = (lo, hi)
+                signature = json.dumps(bucket, sort_keys=True, allow_nan=False)
+                if key in seen_buckets:
+                    if seen_buckets[key] != signature:
+                        raise ValueError("conflicting_bucket")
+                    continue
+                seen_buckets[key] = signature
+                results = bucket.get("results")
+                if not isinstance(results, list):
+                    raise ValueError("invalid_results")
+                day = datetime.datetime.fromtimestamp(lo, datetime.timezone.utc).date().isoformat()
+                dates.append(day)
+                if not results:
+                    empty += 1
+                for item in results:
+                    amount = item.get("amount")
+                    if not isinstance(amount, dict) or type(amount.get("value")) not in (int, float):
+                        raise ValueError("invalid_amount")
+                    value = Decimal(str(amount["value"]))
+                    unit = amount.get("currency") or "usd"
+                    if not value.is_finite() or not isinstance(unit, str):
+                        raise ValueError("invalid_amount")
+                    unit = unit.lower()
+                    if currency is not None and currency != unit:
+                        raise ValueError("mixed_currency")
+                    currency = unit
+                    total += value
+                    cost_dates.append(day)
+            if not payload["has_more"]:
+                break
+            cursor = payload.get("next_page")
+            if not isinstance(cursor, str) or not cursor or cursor in seen_pages:
+                raise ValueError("invalid_pagination")
+            seen_pages.add(cursor)
+            params["page"] = cursor
     except urllib.error.HTTPError as exc:
-        body = exc.read(300).decode("utf-8", "replace")
-        return {"error": f"Platform costs HTTP {exc.code}: {body[:200]}"}
+        # Response bodies and raw exceptions may contain private diagnostics.
+        code = exc.code
+        exc.close()
+        return {"error": f"Platform costs HTTP {code}"}
     except Exception as exc:
-        return {"error": f"Platform costs {type(exc).__name__}: {exc}"}
-    total = 0.0
-    currency = "usd"
-    for bucket in payload.get("data") or []:
-        for item in bucket.get("results") or []:
-            amount = item.get("amount") or {}
-            value = amount.get("value")
-            if isinstance(value, (int, float)):
-                total += float(value)
-            currency = amount.get("currency", currency)
-    return {"cost": round(total, 4), "currency": currency,
+        return {"error": f"Platform costs {type(exc).__name__}"}
+    stamp = lambda value: value.isoformat().replace("+00:00", "Z")
+    return {"cost": float(total.quantize(Decimal("0.0001"))), "currency": currency or "usd",
             "period_start": start.strftime("%Y-%m-%d"),
-            "period_end": now.strftime("%Y-%m-%d")}
+            "period_end": now.strftime("%Y-%m-%d"), "period_timezone": "UTC",
+            "query_start": stamp(start), "query_end": stamp(now), "fetched_at": stamp(now),
+            "last_cost_date": max(cost_dates) if cost_dates else None,
+            "last_bucket_date": max(dates) if dates else None,
+            "has_cost_results": bool(cost_dates), "empty_buckets": empty,
+            "excluded_buckets": excluded, "pages": pages}
 
 
 def fetch_credit_grants(session_key):
@@ -180,13 +245,19 @@ def _write_cache(report):
     credits = report.get("credit_grants", {}) or {}
     available = credits.get("total_available")
     payload = {
+        "version": 2,
         "cost": platform.get("cost"),
         "credit": platform.get("credit", platform.get("budget")),
         "budget": platform.get("budget"),
         "remaining": platform.get("remaining"),
+        "reference_difference": platform.get("reference_difference"),
         "currency": platform.get("currency", "usd"),
         "period_start": platform.get("period_start"),
         "period_end": platform.get("period_end"),
+        **{key: platform.get(key) for key in (
+            "period_timezone", "query_start", "query_end", "fetched_at",
+            "last_cost_date", "last_bucket_date", "has_cost_results",
+            "empty_buckets", "excluded_buckets", "pages")},
         "credits_available": "" if available is None else str(available),
         "refresh_day": platform.get("refresh_day", ""),
         "refresh_note": platform.get("refresh_note", ""),
@@ -216,14 +287,22 @@ def build_report():
                        or cfg.get("OPENAI_MONTHLY_CREDIT")
                        or cfg.get("OPENAI_MONTHLY_BUDGET")
                        or "100")
-    except ValueError:
-        credit = 100.0
+    except (ValueError, TypeError):
+        credit = None
+    if credit is not None and (not math.isfinite(credit) or credit < 0):
+        credit = None
     refresh_day = str(cfg.get("OPENAI_CREDIT_REFRESH_DAY", "")).strip()
     refresh_note = str(cfg.get("OPENAI_CREDIT_REFRESH_NOTE", "")).strip()
     if "cost" in platform:
-        platform["credit"] = round(credit, 2)
-        platform["budget"] = round(credit, 2)  # legacy cache key
-        platform["remaining"] = round(credit - platform["cost"], 2)
+        platform["credit"] = round(credit, 2) if credit is not None else None
+        platform["budget"] = platform["credit"]  # legacy cache key
+        # Calendar-month costs do not establish a subscription grant's billing
+        # cycle or remaining balance. Keep only an explicitly labeled reference.
+        platform["remaining"] = None
+        platform["reference_difference"] = (
+            round(credit - platform["cost"], 2)
+            if credit is not None and platform.get("has_cost_results")
+            and platform.get("currency") == "usd" else None)
         if refresh_note:
             platform["refresh_day"] = ""
             platform["refresh_note"] = refresh_note
@@ -254,13 +333,19 @@ def format_text(report):
     if "cost" in plat:
         refresh = ""
         if plat.get("refresh_day"):
-            refresh = "；额度刷新：预计每月%s日，具体以 Platform 为准" % plat["refresh_day"]
+            refresh = "；配置刷新日：每月%s日" % plat["refresh_day"]
         elif plat.get("refresh_note"):
-            refresh = "；额度刷新：%s" % plat["refresh_note"]
-        lines.append("Platform API 本月：%s %.2f / Pro 额度 %.2f，预计剩余 %.2f（按 Pro 额度折算%s；%s—%s）"
-                     % (plat.get("currency", "usd"), plat["cost"], plat.get("credit", 0),
-                        plat.get("remaining", 0), refresh,
-                        plat.get("period_start", ""), plat.get("period_end", "")))
+            refresh = "；配置刷新说明：%s" % plat["refresh_note"]
+        amount = ("%s %.2f" % (plat.get("currency", "usd"), plat["cost"])
+                  if plat.get("has_cost_results") else "暂无金额结果（不能确认零花费）")
+        lines.append("Platform API 已返回费用：%s；UTC查询 [%s, %s)"
+                     % (amount, plat.get("query_start", ""), plat.get("query_end", "")))
+        lines.append("最后含金额结果日：%s UTC；最后返回桶：%s UTC；抓取：%s。空桶不证明已出账，未返回费用未计入。"
+                     % (plat.get("last_cost_date") or "无", plat.get("last_bucket_date") or "无",
+                        plat.get("fetched_at", "")))
+        if plat.get("reference_difference") is not None:
+            lines.append("配置参考额度 %.2f；参考差额 %.2f（非余额，未计未出账费用；账期未核对%s）"
+                         % (plat.get("credit", 0), plat["reference_difference"], refresh))
     else:
         lines.append("Platform API 本月：不可用（%s）" % plat.get("error", "unknown"))
     credits = report["credit_grants"]

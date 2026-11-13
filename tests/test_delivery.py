@@ -21,6 +21,20 @@ def load_tool(name, common, **dependencies):
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_sticker_rotation_before_style_with_explicit_and_singleton_requests(self):
+        common = types.SimpleNamespace(STICKER_DIR=".", STICKER_COOLDOWN_SECONDS=30,
+                                       load_json=lambda *args: {}, outbound_serialized=lambda fn: fn)
+        tool = load_tool("send_sticker", common)
+        fish = {"id": "fish", "category": "happy", "style": "silly"}
+        star = {"id": "star", "category": "happy", "style": "generic"}
+        sent = {"sent": [{"id": "fish", "at": tool._now().isoformat()}]}
+        def pick(entries, sticker_id=None):
+            return tool._select_candidate({"stickers": entries}, "happy", "silly",
+                                          sticker_id, sent, "master")
+        self.assertEqual(pick([fish, star]), star)
+        self.assertEqual(pick([fish]), fish)
+        self.assertEqual(pick([fish, star], "fish"), fish)
+
     def native_voice_tool(self, payload):
         common = types.SimpleNamespace(
             outbound_serialized=lambda function: function,

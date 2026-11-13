@@ -102,6 +102,15 @@ requires a real source and quote; the daily consolidation uses `--curator` so it
 can write sourced facts for either person, but normal chat replies must not use
 that flag.
 
+`learn --confidential` restricts the fact and its entire source message to the
+source speaker in structured recall. Other facts derived from that message are
+also withheld from the other person. Repeating the same learn operation with
+`--confidential` tightens privacy without creating another version; replaying it
+without the flag does not remove the restriction. Existing databases with
+fact-only privacy flags receive the same filtering, including inactive versions,
+without rewriting their records. This does not delete prior messages or memory
+files, or revoke content already present in a model session.
+
 Sharing permission is defined separately in the project prompts: partner content
 may be relayed to the owner on request; owner content is not disclosed to the
 partner. Shared storage and retrieval do not authorize disclosure. Existing

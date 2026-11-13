@@ -100,6 +100,7 @@ def database(root=ROOT):
                 valid_until TEXT NOT NULL DEFAULT '',
                 changed_at TEXT NOT NULL, operation TEXT NOT NULL UNIQUE);
             CREATE UNIQUE INDEX IF NOT EXISTS current_fact ON facts(subject,key) WHERE active=1;
+            CREATE INDEX IF NOT EXISTS confidential_source ON facts(source) WHERE restricted=1;
             PRAGMA user_version=1;
         """)
         # Additive migration for databases created before memory policy fields.
@@ -147,6 +148,10 @@ def put_fact(db, source, subject, key, value, quote, confidential=False,
     if found:
         updates = []
         params = []
+        if confidential or source["restricted"]:
+            # Relearning may tighten privacy, but an ordinary replay cannot
+            # remove a restriction or create a new fact version.
+            updates.append("restricted=1")
         if valid_from:
             updates.append("valid_from=?")
             params.append(valid_from)
@@ -335,8 +340,14 @@ def recall(db, viewer, query="", limit=10, exclude_source=None, record_access=Fa
 
     now_iso = now()
     now_dt = dt.datetime.now().astimezone()
+    # A fact and its verbatim source contain the same private information.
+    # Check every version so legacy fact-only flags also protect the source
+    # and sibling facts, even after the restricted version becomes inactive.
     rows = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
-                          WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""",
+                          WHERE f.active=1 AND (s.speaker=? OR (
+                              s.restricted=0 AND NOT EXISTS (
+                                  SELECT 1 FROM facts hidden
+                                  WHERE hidden.source=s.id AND hidden.restricted=1)))""",
                       (viewer,)).fetchall()
     rows = [row for row in rows if _valid_at(row, _validity_instant(now_iso))]
     scored = [(score(f["key"] + " " + f["value"], q) if q else 0, f) for f in rows]
@@ -391,7 +402,9 @@ def recall(db, viewer, query="", limit=10, exclude_source=None, record_access=Fa
                "at": f["at"], "source": f["source"]} for f in facts]
 
     if q:
-        events = db.execute("""SELECT * FROM sources WHERE (restricted=0 OR speaker=?)
+        events = db.execute("""SELECT s.* FROM sources s WHERE (s.speaker=? OR (
+            s.restricted=0 AND NOT EXISTS (
+                SELECT 1 FROM facts hidden WHERE hidden.source=s.id AND hidden.restricted=1)))
             AND id NOT IN (SELECT source FROM facts WHERE active=0) ORDER BY at DESC LIMIT 200""", (viewer,)).fetchall()
         scored_events = []
         for item in events:

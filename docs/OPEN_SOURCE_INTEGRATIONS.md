@@ -6,7 +6,7 @@
 | [OpenAI Python SDK](https://github.com/openai/openai-python) + 音频 API | 本轮已实际验证完整音频输入 `gpt-audio-1.5` 并返回声音观察 | 复用现有语音环境与普通 API key；主模型不变，音频模型作听觉辅助，不是另一套转写服务 |
 | [silk-python](https://github.com/synodriver/pysilk) | 将微信原始 SILK 解码成 WAV | 保留全段音频、停顿和静音，不加载本地识别模型、不做 VAD 裁剪 |
 | [SillyTavern](https://github.com/SillyTavern/SillyTavern) / 主动关怀模式 | 借鉴时间意识、空闲触发与对话节奏；没有安装其运行时或直接调用插件 | 现有 timer 链路保留，按接收者、近期话题和未回复情况决策 |
-| [Mem0](https://github.com/mem0ai/mem0) | 本轮评估，未安装、未迁移私人记忆 | 当前事实有来源、版本、纠错与有效期；迁移要保留这些语义。现阶段先修实际故障、用现有检索用例验证 |
+| [Mem0](https://github.com/mem0ai/mem0) | 已核对[原始示例](https://github.com/mem0ai/mem0/blob/f1791daa86d469249c9b002f62644d58a1eb96a0/README.md)按 `user_id` 过滤检索；未安装、未迁移私人记忆 | 沿用现有 SQLite 与来源、版本、有效期语义，将保密过滤同时施于事实、原句和同源事实；不复制上游代码 |
 | AstrBot / OpenClaw 等陪伴与记忆项目 | 部分行为设计曾参考，不能称已完成插件对接 | 不新增第二套会话、调度和身份系统；具体能力缺口再接成熟组件 |
 
 提示词补上新闻查证、学习步骤、发送结果核实、称呼归属和关怀闭环；保留当前积极发表情的风格。

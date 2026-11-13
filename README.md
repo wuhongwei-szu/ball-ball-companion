@@ -193,7 +193,7 @@ python -X utf8 tools/sticker_admin.py list
 
 完整原音通过现有附件链路保留，`listen_audio.py` 使用 `gpt-audio-1.5` 听内容、语气和停顿，再由当前主模型结合对话回应。微信现有转写继续使用，不另建转写服务。现有语音 Python 3.12 环境安装 `requirements.txt` 即可复用；细节见 [架构](docs/ARCHITECTURE.md#original-voice-input)。
 
-公开录音的实际 API 调用和完整附件字节链路已验证；手机微信入站仍需实测。
+公开录音 API 调用、完整附件字节链路和维护部署微信原音链路的验证范围见 [验收记录](docs/REFACTOR_PLAN.md)。新部署仍需验证接收层补丁与自己的微信语音入站。
 
 原生语音气泡会被 iLink 拒绝（`ret=-1`），所以语音以 **MP3 文件**发送。准备一个独立的 Python 3.12 环境：
 

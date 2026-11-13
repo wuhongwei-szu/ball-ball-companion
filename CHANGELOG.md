@@ -1,3 +1,11 @@
+## Unreleased
+
+- Apply structured-memory confidentiality to the original source and all facts
+  derived from it, including legacy fact-only restrictions and inactive versions.
+  Relearning with `--confidential` tightens privacy without duplicating a version;
+  ordinary replays cannot clear the restriction.
+- Correct capture, voice-validation and historical regression documentation.
+
 ## v0.3.0 — 2026-11-13
 
 - Preserve complete WeChat voice attachments alongside existing transcription;

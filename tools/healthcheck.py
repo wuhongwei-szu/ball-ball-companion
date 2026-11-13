@@ -19,7 +19,8 @@ if hasattr(sys.stdout, "reconfigure"):
 CONFIG_FILE = os.path.join(c.DATA_DIR, "config.toml")
 JOBS_FILE = os.path.join(c.DATA_DIR, "crons", "jobs.json")
 LOG_DIR = os.path.join(c.DATA_DIR, "logs")
-BACKUP_DIR = os.path.join(c.WORK_DIR, "backups")
+BACKUP_DIR = os.path.expandvars(os.path.expanduser(c.CFG.get("backup_dir") or (
+    "G:\\cc-weixin-backups" if os.path.isdir("G:\\") else os.path.join(c.WORK_DIR, "backups"))))
 
 
 def ps(command):
@@ -29,6 +30,8 @@ def ps(command):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=15,
         )
+        if result.returncode:
+            return f"ERR PowerShell exited {result.returncode}"
         return (result.stdout or "").strip()
     except Exception as exc:
         return f"ERR {exc}"
@@ -59,7 +62,9 @@ def main():
 
     count = ps("(Get-Process -Name cc-connect -ErrorAction SilentlyContinue | Measure-Object).Count")
     process_ok = count.isdigit() and int(count) >= 1
-    print(f"[{'OK' if process_ok else '!!'}] cc-connect 进程: {count}")
+    print(f"[{'OK' if process_ok else '!!'}] 当前权限可见的 cc-connect 进程: {count}")
+    if not process_ok:
+        print("    未确认运行状态；进程不可见或查询失败不等于服务已停止。")
     if not process_ok:
         ok = False
 
@@ -85,6 +90,10 @@ def main():
                 jobs = json.load(f)
         except Exception:
             jobs = []
+    if not isinstance(jobs, list) or any(not isinstance(job, dict) for job in jobs):
+        print("[!!] 定时任务: 文件结构无效")
+        jobs = []
+        ok = False
     enabled = sum(1 for j in jobs if j.get("enabled"))
     print(f"[{'OK' if enabled > 0 else '!!'}] 定时任务: {enabled} 启用 / {len(jobs)} 总数")
     if enabled <= 0:
@@ -121,7 +130,8 @@ def main():
 
     last = os.path.join(c.MEMORY_DIR, "last-consolidation.txt")
     if os.path.isfile(last):
-        lines = [l.strip() for l in open(last, encoding="utf-8") if l.strip()]
+        with open(last, encoding="utf-8") as source:
+            lines = [l.strip() for l in source if l.strip()]
         print(f"[OK] 最近整理: {lines[-1] if lines else '（空）'}")
     else:
         print("[!!] 最近整理: 缺失")
@@ -134,6 +144,7 @@ def main():
         print(f"[OK] 最近备份: {os.path.basename(latest_backup)} ({age_hours:.1f} 小时前)")
         if age_hours > 48:
             print("[WARN] 最近备份超过 48 小时，检查 cc-connect-backup 计划任务")
+            ok = False
     else:
         print("[!!] 最近备份: 缺失")
         ok = False
@@ -194,17 +205,26 @@ def main():
         ok = False
 
     tasks = ps("Get-ScheduledTask -TaskName cc-connect-watchdog,cc-connect-backup -ErrorAction SilentlyContinue | ForEach-Object { $_.TaskName + '=' + $_.State }")
-    print(f"[OK] 计划任务: {tasks.replace(os.linesep, '; ')}")
+    task_states = dict(line.strip().split("=", 1) for line in tasks.splitlines() if "=" in line)
+    tasks_ok = all(task_states.get(name) in ("Ready", "Running")
+                   for name in ("cc-connect-watchdog", "cc-connect-backup"))
+    print(f"[{'OK' if tasks_ok else '!!'}] 计划任务: {tasks.replace(os.linesep, '; ') or '当前权限不可见、未配置或查询失败'}")
+    if not tasks_ok:
+        ok = False
 
     pending = 0
     try:
         timer_result = c.run_cc(["timer", "list"], timeout=15)
         out = timer_result.stdout or ""
         match = re.search(r"Pending timers \((\d+)\)", out)
-        pending = int(match.group(1)) if match else 0
+        if timer_result.returncode != 0 or not match:
+            raise RuntimeError("cc-connect timer list 未返回有效结果")
+        pending = int(match.group(1))
     except Exception as exc:
         print(f"[!!] 待触发提醒: 查询失败 {exc}")
-    print(f"[OK] 待触发提醒: {pending}")
+        ok = False
+    else:
+        print(f"[OK] 待触发提醒: {pending}")
 
     care = "未规划"
     if os.path.isfile(c.CARE_PLAN_FILE):

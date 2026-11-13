@@ -25,9 +25,10 @@
 
 1. **Capture** — `capture_transcripts.py` runs every 5 minutes and appends new
    messages from the cc-connect session JSON to `memory/raw/`.
-2. **Assistant backfill** — `capture_review.py` appends the assistant's own
-   direct replies (which the conservative capture job holds for review) to raw,
-   so consolidation sees both sides of the conversation.
+2. **Generated-reply archive** — `capture_review.py` processes only
+   `assistant_unverified` ranges under the capture lock after checking ownership,
+   history prefix and timestamps. Every record is labeled as generated with
+   delivery unverified. Baseline gaps remain; uncertain writes block retry.
 3. **Send logging** — `send_msg.py` appends each outgoing bubble to raw and
    recent replies.
 4. **Consolidate** — the `memcons01` cron runs at 03:17, reads recent raw and
@@ -47,8 +48,9 @@
 7. **Search** — for older details, `memory_search.py "keyword"` returns current
    facts plus labeled legacy evidence; MEMORY.md sections are attributed to the
    right person. If nothing matches, say so instead of guessing.
-8. **Regression** — `memory_eval.py` runs a small set of real retrieval cases
-   during the daily consolidation and records failures without changing data.
+8. **Regression** — the maintained deployment has a private `memory_eval.py`
+   with real retrieval cases; it is not included in the public repository.
+   Public synthetic regressions are in `tests/test_shared_memory.py`.
 
 ## Importance, decay and validity
 
@@ -64,6 +66,9 @@
   consolidation runs `companion_memory.py expire`, which marks expired facts
   inactive while keeping their source/history. Stable preferences should not
   get an expiry date.
+- Timestamps compare actual instants across offsets; legacy naive timestamps
+  retain local-time meaning. Invalid validity fields are rejected before replacing
+  current facts. Expiry does not remove a fact concurrently extended by a curator.
 
 ## Redaction
 
@@ -96,3 +101,10 @@ cross-user disclosure and keeps the context small. `companion_memory.py learn`
 requires a real source and quote; the daily consolidation uses `--curator` so it
 can write sourced facts for either person, but normal chat replies must not use
 that flag.
+
+Sharing permission is defined separately in the project prompts: partner content
+may be relayed to the owner on request; owner content is not disclosed to the
+partner. Shared storage and retrieval do not authorize disclosure. Existing
+restricted-source filtering remains a separate conservative storage mechanism;
+the prompt policy is not a filesystem access-control boundary. Explicitly deleted
+history must not be restored by consolidation or historical backfill.

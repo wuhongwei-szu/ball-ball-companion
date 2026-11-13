@@ -3,73 +3,15 @@
 A lock protects local journals, not the remote timer API. Once a process starts,
 any error or unrecognized reply is uncertain and must not be retried blindly.
 """
-import contextlib
-import json
-import os
 import re
 import subprocess
 
 import common as c
-
-
-class StateError(RuntimeError):
-    pass
-
-
-class StateBusy(StateError):
-    pass
+from local_state import StateError, StateBusy, locked, read_json
 
 
 class NotStarted(RuntimeError):
     """The timer command definitely did not start; a later retry is safe."""
-
-
-@contextlib.contextmanager
-def locked(path):
-    """Nonblocking cross-process lock, automatically released after a crash.
-
-    Never unlink the lock file: replacing its inode permits two lock owners.
-    Only scripts using this protocol are protected; external/manual writers
-    must be stopped before repairing state.
-    """
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(str(path) + ".lock", "a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0:
-                handle.write(b"\0")
-                handle.flush()
-            handle.seek(0)
-            try:
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError as exc:
-                raise StateBusy("another timer writer is active") from exc
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise StateBusy("another timer writer is active") from exc
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
-
-
-def read_json(path, absent):
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-    except FileNotFoundError:
-        return absent
-    except (OSError, ValueError) as exc:
-        raise StateError("cannot read timer state; preserve it and reconcile timers") from exc
 
 
 def add_timer(args):

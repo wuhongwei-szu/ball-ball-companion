@@ -1,0 +1,222 @@
+--- a/platform/weixin/media_inbound.go
++++ b/platform/weixin/media_inbound.go
+@@ -58,7 +58,7 @@
+ 		seenEnc[enc] = struct{}{}
+ 		return true
+ 	}
+-	var extraVoiceN int
++	var voiceN int
+ 
+ 	for _, it := range items {
+ 		switch it.Type {
+@@ -129,10 +129,6 @@
+ 			if v == nil || v.Media == nil {
+ 				continue
+ 			}
+-			if strings.TrimSpace(v.Text) != "" {
+-				// WeChat ASR text is enough when present; avoid STT path / duplicate handling.
+-				continue
+-			}
+ 			enc := strings.TrimSpace(v.Media.EncryptQueryParam)
+ 			keyB64 := strings.TrimSpace(v.Media.AESKey)
+ 			if enc == "" || keyB64 == "" || !tryEnc(enc) {
+@@ -143,22 +139,14 @@
+ 				slog.Warn("weixin: inbound voice CDN failed", "error", err)
+ 				continue
+ 			}
+-			a := &core.AudioAttachment{
++			// Keep every full original voice alongside any platform text. Files use
++			// existing agent staging/queueing without invoking legacy STT handling.
++			voiceN++
++			files = append(files, core.FileAttachment{
+ 				MimeType: "audio/silk",
+ 				Data:     buf,
+-				Format:   "silk",
+-			}
+-			if audio == nil {
+-				audio = a
+-			} else {
+-				// core.Message carries one Audio; extra raw voice segments go as file attachments for the agent.
+-				extraVoiceN++
+-				files = append(files, core.FileAttachment{
+-					MimeType: "audio/silk",
+-					Data:     buf,
+-					FileName: fmt.Sprintf("voice_%d.silk", extraVoiceN),
+-				})
+-			}
++				FileName: fmt.Sprintf("voice_%d.silk", voiceN),
++			})
+ 		}
+ 	}
+ 	return images, files, audio
+--- /dev/null
++++ b/platform/weixin/voice_attachment_test.go
+@@ -0,0 +1,137 @@
++package weixin
++
++import (
++	"bytes"
++	"context"
++	"encoding/base64"
++	"io"
++	"net/http"
++	"os"
++	"strings"
++	"testing"
++
++	"github.com/chenhg5/cc-connect/core"
++)
++
++func voiceAttachmentFixture(t *testing.T, payloads map[string][]byte, status int) (*Platform, map[string]int) {
++	t.Helper()
++	key := []byte("0123456789abcdef")
++	calls := make(map[string]int)
++	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
++		if req.URL.Host != "offline.invalid" || req.URL.Path != "/download" {
++			t.Fatalf("unexpected CDN request %s", req.URL.Path)
++		}
++		ref := req.URL.Query().Get("encrypted_query_param")
++		calls[ref]++
++		data, ok := payloads[ref]
++		if !ok {
++			t.Fatalf("unknown fixture CDN reference")
++		}
++		encrypted, err := encryptAESECB(data, key)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(encrypted)), Request: req}, nil
++	})}
++	return &Platform{cdnBaseURL: "https://offline.invalid", cdnHttpClient: client}, calls
++}
++
++func voiceAttachmentItem(ref, text string) messageItem {
++	return messageItem{Type: messageItemVoice, VoiceItem: &voiceItem{Text: text, Media: &cdnMedia{
++		EncryptQueryParam: ref, AESKey: base64.StdEncoding.EncodeToString([]byte("0123456789abcdef")),
++	}}}
++}
++
++func dispatchVoiceFixture(t *testing.T, p *Platform, items []messageItem) *core.Message {
++	t.Helper()
++	var received *core.Message
++	p.dispatchInbound(context.Background(), &weixinMessage{MessageID: 123, MessageType: messageTypeUser, FromUserID: "fixture-user", ItemList: items}, func(_ core.Platform, msg *core.Message) { received = msg })
++	if received == nil {
++		t.Fatal("inbound voice was discarded")
++	}
++	return received
++}
++
++func TestVoiceAttachmentPreservesFullAudioAlongsideExistingText(t *testing.T) {
++	// A long stream catches accidental previews/truncation; bytes need not be
++	// speech because this boundary must never interpret or alter the audio.
++	payload := append([]byte("\x02#!SILK_V3"), bytes.Repeat([]byte("whole-waveform\x00\xff"), 128*1024)...)
++	p, calls := voiceAttachmentFixture(t, map[string][]byte{"voice-a": payload}, http.StatusOK)
++	msg := dispatchVoiceFixture(t, p, []messageItem{voiceAttachmentItem("voice-a", "现有微信识别文字")})
++	if msg.Content != "现有微信识别文字" || msg.SourceUserContent != msg.Content {
++		t.Fatal("existing text was replaced")
++	}
++	if msg.Audio != nil || len(msg.Files) != 1 {
++		t.Fatalf("legacy STT audio=%v files=%d", msg.Audio, len(msg.Files))
++	}
++	if msg.Files[0].MimeType != "audio/silk" || !strings.HasSuffix(msg.Files[0].FileName, ".silk") {
++		t.Fatal("missing typed voice attachment")
++	}
++	if !bytes.Equal(msg.Files[0].Data, payload) || calls["voice-a"] != 1 {
++		t.Fatal("full raw audio not preserved exactly once")
++	}
++	paths := core.SaveFilesToDisk(t.TempDir(), "fixture-voice", msg.Files)
++	if len(paths) != 1 {
++		t.Fatal("existing file staging did not save the voice")
++	}
++	saved, err := os.ReadFile(paths[0])
++	if err != nil || !bytes.Equal(saved, payload) {
++		t.Fatal("staged audio bytes changed")
++	}
++}
++
++func TestVoiceAttachmentWithoutTextBypassesLegacySTT(t *testing.T) {
++	payload := []byte("\x02#!SILK_V3\nall-original-audio")
++	p, _ := voiceAttachmentFixture(t, map[string][]byte{"voice-a": payload}, http.StatusOK)
++	msg := dispatchVoiceFixture(t, p, []messageItem{voiceAttachmentItem("voice-a", "")})
++	if msg.Audio != nil || len(msg.Files) != 1 || !bytes.Equal(msg.Files[0].Data, payload) {
++		t.Fatal("raw voice was routed into legacy STT")
++	}
++	if msg.Content != "【语音附件】用户发送了完整语音。" || msg.SourceUserContent != "" {
++		t.Fatal("attachment hint must not become authenticated user speech")
++	}
++}
++
++func TestVoiceAttachmentPreservesEveryDistinctSegmentAndDeduplicatesReferences(t *testing.T) {
++	first, second := []byte("\x02#!SILK_V3\nfirst-complete-segment"), []byte("\x02#!SILK_V3\nsecond-complete-segment")
++	p, calls := voiceAttachmentFixture(t, map[string][]byte{"voice-a": first, "voice-b": second}, http.StatusOK)
++	msg := dispatchVoiceFixture(t, p, []messageItem{voiceAttachmentItem("voice-a", ""), voiceAttachmentItem("voice-b", ""), voiceAttachmentItem("voice-a", "")})
++	if msg.Audio != nil || len(msg.Files) != 2 {
++		t.Fatalf("audio=%v files=%d", msg.Audio, len(msg.Files))
++	}
++	if !bytes.Equal(msg.Files[0].Data, first) || !bytes.Equal(msg.Files[1].Data, second) || msg.Files[0].FileName == msg.Files[1].FileName {
++		t.Fatal("segments were truncated, reordered or overwritten")
++	}
++	if calls["voice-a"] != 1 || calls["voice-b"] != 1 {
++		t.Fatal("duplicate CDN reference downloaded again")
++	}
++}
++
++func TestVoiceAttachmentDownloadFailureRetainsTextAndDoesNotInventAudio(t *testing.T) {
++	for _, text := range []string{"现有微信识别文字", ""} {
++		t.Run(text, func(t *testing.T) {
++			p, calls := voiceAttachmentFixture(t, map[string][]byte{"voice-a": []byte("unavailable")}, http.StatusNotFound)
++			msg := dispatchVoiceFixture(t, p, []messageItem{voiceAttachmentItem("voice-a", text)})
++			if msg.Audio != nil || len(msg.Files) != 0 || calls["voice-a"] != 1 {
++				t.Fatal("failed download became a voice attachment")
++			}
++			if msg.SourceUserContent != text {
++				t.Fatal("failure/hint became user source text")
++			}
++			if text != "" && msg.Content != text {
++				t.Fatal("existing recognized text lost on download failure")
++			}
++			if text == "" && !strings.Contains(msg.Content, "CDN 下载或解密失败") {
++				t.Fatal("missing honest media download failure")
++			}
++		})
++	}
++}
++
++func TestVoiceAttachmentDoesNotReplaceExistingCaption(t *testing.T) {
++	p, _ := voiceAttachmentFixture(t, map[string][]byte{"voice-a": []byte("\x02#!SILK_V3\nfull")}, http.StatusOK)
++	msg := dispatchVoiceFixture(t, p, []messageItem{{Type: messageItemText, TextItem: &textItem{Text: "这段声音里的停顿"}}, voiceAttachmentItem("voice-a", "微信转文字")})
++	if msg.Content != "这段声音里的停顿" || msg.SourceUserContent != msg.Content || len(msg.Files) != 1 {
++		t.Fatal("caption was replaced by a system hint or transcript")
++	}
++}
+--- a/platform/weixin/weixin.go
++++ b/platform/weixin/weixin.go
+@@ -11,6 +11,7 @@
+ 	"net/url"
+ 	"os"
+ 	"path/filepath"
++	"slices"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -529,7 +530,11 @@
+ 	}
+ 
+ 	body := bodyFromItemList(m.ItemList)
++	sourceUserContent := body
+ 	images, files, audio := p.collectInboundMedia(ctx, m.ItemList)
++	if strings.TrimSpace(body) == "" && slices.ContainsFunc(files, func(file core.FileAttachment) bool { return file.MimeType == "audio/silk" }) {
++		body = "【语音附件】用户发送了完整语音。"
++	}
+ 	if strings.TrimSpace(body) == "" && len(images) == 0 && len(files) == 0 && audio == nil && mediaOnlyItems(m.ItemList) {
+ 		body = "[收到媒体消息：CDN 下载或解密失败，或未配置 cdn_base_url；请改用文字说明。]"
+ 	}
+@@ -550,7 +555,7 @@
+ 		UserID:            from,
+ 		UserName:          shortWeixinUser(from),
+ 		Content:           body,
+-		SourceUserContent: body,
++		SourceUserContent: sourceUserContent,
+ 		Images:            images,
+ 		Files:             files,
+ 		Audio:             audio,

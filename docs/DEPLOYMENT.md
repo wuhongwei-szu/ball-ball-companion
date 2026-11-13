@@ -38,7 +38,7 @@ and fill in:
 - `session_file` (find it under `%USERPROFILE%\.cc-connect\sessions\`; its name
   includes the work-dir hash)
 - `master_session_id` / `xi_session_id` (normally `s1` / `s2`)
-- `xi_platform_index` (normally `2`, the second weixin platform)
+- `master_account_id` / `xi_account_id` (distinct stable bot accounts; list order is not identity)
 - `bot_name` and labels
 
 Do **not** put tokens or openids in this file. `common.py` reads them at

@@ -1,0 +1,4 @@
+# Core media helpers and offline regression suite (verified on Windows).
+cryptography==46.0.5
+openai==2.43.0
+silk-python==0.2.9

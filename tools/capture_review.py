@@ -1,141 +1,122 @@
 #!/usr/bin/env python3
-"""Backfill verified assistant replies into raw transcripts.
+"""Archive attributable generated replies; session history is not delivery proof.
 
-The conservative capture job holds assistant messages in review ranges instead
-of appending them automatically. Those messages contain the bot's own long
-answers, promises and explanations; without them the daily memory consolidation
-only sees the user side of the conversation. This tool appends the review
-ranges for sessions that are still present in the cc-connect session file and
-then removes those ranges from the capture state.
-
-Usage:
-    python -X utf8 tools/capture_review.py --dry-run
-    python -X utf8 tools/capture_review.py --active
-    python -X utf8 tools/capture_review.py --all
+Only assistant_unverified ranges are eligible. Baselines and boundary warnings
+remain untouched. A durable pending marker blocks capture after any uncertain
+append outcome; repeated message text is never treated as an event identifier.
 """
 import argparse
-import json
-import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common as c
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import capture_runtime as runtime
 
-STATE_FILE = c.CAPTURE_STATE_FILE + ".v2"
-
-
-def _load(path):
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+GENERATED = "[会话生成记录，送达未核实]\n"
 
 
-def _raw_path(channel, ts):
-    date = (ts or "")[:10]
-    if not date:
-        return None
-    return Path(c.RAW_DIR) / channel / (date + ".md")
-
-
-def _exists(cache, channel, ts, text):
-    path = _raw_path(channel, ts)
-    if path is None:
-        return False
-    key = str(path)
-    if key not in cache:
-        try:
-            cache[key] = path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            cache[key] = ""
-    return text and text in cache[key]
-
-
-def _append_missing(cache, channel, ts, text):
-    safe = c.redact(text)
-    if not safe.strip() or _exists(cache, channel, ts, safe):
-        return False
-    c.append_raw(channel, safe, "assistant", ts)
-    path = _raw_path(channel, ts)
-    if path is not None:
-        try:
-            cache[str(path)] = path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            cache[str(path)] = ""
-    return True
-
-
-def _process_range(history, channel, review, cache, dry_run):
-    start = max(0, int(review.get("start", 0)))
-    end = min(len(history), int(review.get("end", 0)))
-    written = 0
-    for item in history[start:end]:
-        if not isinstance(item, dict) or item.get("role") != "assistant":
+def _prepare(common, state, data, all_sessions=False, channel=None):
+    runtime.validate_state(state)
+    if any(entry["pending"] is not None for record in state["channels"].values()
+           for entry in record["sessions"].values()):
+        runtime.fail("append_outcome_uncertain")
+    channels = runtime.resolve_channels(data, common.CFG)
+    prepared = []
+    for name, record in state["channels"].items():
+        if channel and channel != name:
             continue
-        text = (item.get("content") or "").strip()
-        if not text or text.upper() == "NO_REPLY":
-            continue
-        if dry_run:
-            written += 1
-        elif _append_missing(cache, channel, item.get("timestamp", ""), text):
-            written += 1
-    return written
-
-
-def main():
-    parser = argparse.ArgumentParser(description="把待审核的助手回复回填到 raw 原文")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--active", action="store_true", help="只处理当前活跃会话（默认）")
-    parser.add_argument("--all", action="store_true", help="处理 session 文件中仍存在的所有会话")
-    parser.add_argument("--channel", choices=["s1", "s2"], help="只处理一个通道")
-    args = parser.parse_args()
-
-    if not os.path.isfile(c.SESSION_FILE):
-        print("session file not found", file=sys.stderr)
-        return 1
-    if not os.path.isfile(STATE_FILE):
-        print("capture state not found", file=sys.stderr)
-        return 1
-
-    sessions = _load(c.SESSION_FILE).get("sessions") or {}
-    state = _load(STATE_FILE)
-    cache = {}
-    total = 0
-    touched = 0
-
-    for channel, record in (state.get("channels") or {}).items():
-        if args.channel and channel != args.channel:
-            continue
-        if not isinstance(record, dict):
-            continue
-        active = record.get("active")
-        candidates = []
-        if args.all:
-            candidates = list((record.get("sessions") or {}).keys())
-        elif active:
-            candidates = [active]
+        owner, active, _ = channels[name]
+        if (record["owner"] != runtime.digest(state["salt"], owner, b"capture-owner\0")
+                or record["active"] != active):
+            runtime.fail("channel_owner_changed")
+        candidates = list(record["sessions"]) if all_sessions else [active]
         for sid in candidates:
-            entry = (record.get("sessions") or {}).get(sid)
-            session = sessions.get(sid)
-            if not isinstance(entry, dict) or not isinstance(session, dict):
+            entry = record["sessions"][sid]
+            ranges = [item for item in entry["review"]
+                      if item["reason"] == "assistant_unverified"]
+            if not ranges:
                 continue
-            history = session.get("history") or []
-            review = entry.get("review") or []
-            if not review:
-                continue
-            written = 0
-            for item in review:
-                if isinstance(item, dict):
-                    written += _process_range(history, channel, item, cache, args.dry_run)
-            if written and not args.dry_run:
-                entry["review"] = []
-                touched += 1
-            total += written
-            print(f"[{channel}:{sid}] review_ranges={len(review)} messages_written={written}")
+            memberships = [key for key, ids in data["user_sessions"].items()
+                           if sid in (ids if isinstance(ids, list) else [ids])]
+            session = data["sessions"].get(sid)
+            if (memberships != [owner] or not isinstance(session, dict)
+                    or session.get("id") != sid):
+                runtime.fail("session_owner_changed")
+            history = session.get("history")
+            cursor = entry["cursor"]
+            if (not isinstance(history, list) or cursor > len(history)
+                    or entry["prefix"] != runtime.prefix(state["salt"], history, cursor)):
+                runtime.fail("history_continuity_unproven")
+            for review in ranges:
+                for index in range(review["start"], review["end"]):
+                    role, text, stamp = runtime.item_fields(history[index])
+                    if role != "assistant" or not text or text.upper() == "NO_REPLY" or not stamp:
+                        runtime.fail("review_item_unproven")
+                    prepared.append((name, entry, index, text, stamp))
+    return prepared
 
-    if touched and not args.dry_run:
-        c.save_json_atomic(STATE_FILE, state)
-    print(f"{'DRY-RUN' if args.dry_run else 'BACKFILL_OK'} messages={total} sessions={touched}")
-    return 0
+
+def _remove_review_index(entry, index):
+    remaining = []
+    for review in entry["review"]:
+        if review["reason"] != "assistant_unverified" or not review["start"] <= index < review["end"]:
+            remaining.append(review)
+            continue
+        if review["start"] < index:
+            remaining.append({**review, "end": index})
+        if index + 1 < review["end"]:
+            remaining.append({**review, "start": index + 1})
+    entry["review"] = remaining
+
+
+def review(common, *, dry_run=False, all_sessions=False, channel=None):
+    path = common.CAPTURE_STATE_FILE + ".v2"
+    def load():
+        state = runtime.read_json(path)
+        return state, _prepare(common, state, runtime.read_json(common.SESSION_FILE),
+                               all_sessions, channel)
+    if dry_run:
+        _, prepared = load()
+        return len(prepared)
+    with runtime.locked(path):
+        state, prepared = load()
+        for name, entry, index, text, stamp in prepared:
+            # Keep the existing pending schema so ordinary capture also blocks.
+            entry["pending"] = {"index": entry["cursor"]}
+            entry["review_append_index"] = index
+            runtime.save_state(path, state)
+            try:
+                common.append_raw(name, GENERATED + text, "assistant", stamp)
+            except Exception:
+                runtime.fail("append_outcome_uncertain")
+            _remove_review_index(entry, index)
+            entry["pending"] = None
+            entry.pop("review_append_index", None)
+            # Failure here leaves the durable pre-append pending marker intact.
+            runtime.save_state(path, state)
+        return len(prepared)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="归档有来源的助手生成记录（送达未核实）")
+    parser.add_argument("--dry-run", action="store_true")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--active", action="store_true")
+    scope.add_argument("--all", action="store_true")
+    parser.add_argument("--channel", choices=["s1", "s2"])
+    args = parser.parse_args(argv)
+    # Importing common loads deployment configuration; tests inject a fixture.
+    import common
+    try:
+        count = review(common, dry_run=args.dry_run, all_sessions=args.all,
+                       channel=args.channel)
+        print(f"review_status={'dry_run' if args.dry_run else 'ok'} generated_records={count}")
+        return 0
+    except runtime.CaptureError as exc:
+        print(f"review_status=blocked reason={exc.args[0]}", file=sys.stderr)
+    except Exception:
+        print("review_status=blocked reason=io_or_internal_failure", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

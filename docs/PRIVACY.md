@@ -19,6 +19,7 @@ Only generic code, templates, and documentation. It contains **no**:
 | Bot paths / session IDs | `config/bot.config.json` | No (gitignored) |
 | Long-term memory / raw chats | `memory/` | No (gitignored) |
 | Local stickers / generated images | `assets/`, `artifacts/` | No (gitignored) |
+| Original voice/file attachments | `.cc-connect/attachments/` | No (gitignored and publication scan blocked) |
 | Logs / backups | `logs/`, `backups/` | No (gitignored) |
 | API key | environment variable / local `.env` | No |
 
@@ -28,10 +29,15 @@ Only generic code, templates, and documentation. It contains **no**:
 derive:
 
 - the full session keys for `s1` / `s2`
-- the second bot's token, account ID, and context-token path
+- the configured stable bot account bindings inside the selected project,
+  with each account's token and context-token path
 
 These values stay in memory and are never written to `bot.config.json` or the
 repository.
+
+Original voice analysis uses the audio API chosen for the deployment. It sends
+the complete recording, uses the existing regular API key, and does not print
+audio payloads or SDK debug bodies. The main chat model and persona remain in use.
 
 ## Redaction
 
@@ -46,8 +52,9 @@ the bot.
   and `.env`.
 - `scripts/secret_scan.py` scans for API keys, bot tokens, openids, personal
   Windows paths, and private keys. CI runs it on every push.
-- `scripts/sync_to_github.ps1` copies only reusable tools and refuses to
-  commit if the scan fails.
+- `scripts/sync_to_github.ps1` copies an explicit list of reusable files and
+  defaults to preparation only. `-Publish` explicitly enables commit/push;
+  it scans the exact staged snapshot and refuses to include unrelated changes.
 
 ## Deployment recommendations
 

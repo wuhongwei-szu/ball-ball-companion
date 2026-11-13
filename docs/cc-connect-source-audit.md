@@ -11,7 +11,7 @@
   busy-session queue acknowledgements are suppressed. No account IDs are
   embedded in that implementation.
 - Seventeen later account-routing, timer and shared-memory source changes match
-  the retained build manifest. The installed executable SHA-256 matches it:
+  the retained build manifest. The original shared-memory release executable SHA-256 was:
   4b7a28f3fa5236484e0d588a35f7cb3f9fe7de7211950d022321c978c94175f7.
 - Retained full source digest:
   8da078ef94f1cd42e651ff51edbbc00faccd55a5469be5d5d96f28b2c514f06b.
@@ -41,3 +41,11 @@ The previous release records report focused tests, not a fully passing Go suite.
 The Python memory bridge requires an absolute python executable path in private
 config/shared_memory.json as well as the project and subject bindings. The
 example now includes this required field. It is not a deployment instruction.
+
+## Current runtime receipt
+
+Later usage and original-voice changes are tracked in the maintained deployment.
+The current application release receipt records the actual executable, source
+archive and rollback location. The original-voice patch only changes Weixin
+attachment handling; it preserves the existing engine and agent backend.
+See `deploy/cc-connect-voice-attachment.patch` and `REFACTOR_PLAN.md`.

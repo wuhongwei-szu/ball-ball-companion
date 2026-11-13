@@ -1,0 +1,2 @@
+# Unified diff context legitimately contains a leading space before Go tabs.
+*.patch text eol=lf -whitespace

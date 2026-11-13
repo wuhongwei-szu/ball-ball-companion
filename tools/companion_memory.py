@@ -68,7 +68,7 @@ def env_caller(cfg):
         # bot account is dedicated to exactly one subject, so a unique account
         # match is sufficient for the learn CLI. The bridge keeps using the
         # strict caller() above for message ingestion.
-        if account:
+        if account and project == cfg['project'] and session_key:
             matches = [role for role, item in cfg["subjects"].items() if item["account"] == account]
             if len(matches) == 1:
                 return matches[0]
@@ -240,8 +240,29 @@ def _normalize_validity(value, end=False):
     if not value:
         return ""
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        return value + ("T23:59:59" if end else "T00:00:00")
-    return value
+        value += "T23:59:59" if end else "T00:00:00"
+    instant = _validity_instant(value)
+    if instant is None:
+        raise MemoryError('invalid_validity_timestamp')
+    return instant.isoformat()
+
+
+def _validity_instant(value):
+    instant = _parse_iso(value)
+    if instant is not None and instant.tzinfo is None:
+        # Older date-only policy fields were written in the deployment's local
+        # time. Preserve that meaning rather than treating them as UTC.
+        instant = instant.astimezone()
+    return instant
+
+
+def _valid_at(fact, at):
+    for key, lower in (('valid_from', True), ('valid_until', False)):
+        if fact[key]:
+            instant = _validity_instant(fact[key])
+            if instant is None or (at < instant if lower else at >= instant):
+                return False
+    return True
 
 
 def _default_importance(subject, key, value):
@@ -279,13 +300,21 @@ def _fact_rank(fact, now_dt=None):
 
 def expire_facts(db, at=None):
     """Deactivate facts whose valid_until has passed; returns the count."""
-    at = at or now()
+    at = _validity_instant(at or now())
+    if at is None:
+        raise MemoryError('invalid_expiration_timestamp')
+    expired = [(row['id'], row['valid_until']) for row in db.execute(
+        "SELECT id,valid_until FROM facts WHERE active=1 AND valid_until!=''")
+        if (instant := _validity_instant(row['valid_until'])) is not None and instant <= at]
+    count = 0
     with db:
-        cur = db.execute(
-            "UPDATE facts SET active=0 WHERE active=1 AND valid_until!='' AND valid_until<=?",
-            (at,),
-        )
-    return cur.rowcount
+        for fid, deadline in expired:
+            # A curator may extend the same operation between selection and
+            # this write. Only expire the exact deadline that was inspected.
+            result = db.execute('UPDATE facts SET active=0 WHERE id=? AND active=1 AND valid_until=?',
+                                (fid, deadline))
+            count += result.rowcount
+    return count
 
 
 def recall(db, viewer, query="", limit=10, exclude_source=None, record_access=False):
@@ -307,10 +336,9 @@ def recall(db, viewer, query="", limit=10, exclude_source=None, record_access=Fa
     now_iso = now()
     now_dt = dt.datetime.now().astimezone()
     rows = db.execute("""SELECT f.*,s.speaker,s.at FROM facts f JOIN sources s ON s.id=f.source
-                          WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)
-                            AND (f.valid_from='' OR f.valid_from<=?)
-                            AND (f.valid_until='' OR f.valid_until>?)""",
-                      (viewer, now_iso, now_iso)).fetchall()
+                          WHERE f.active=1 AND (f.restricted=0 OR s.speaker=?)""",
+                      (viewer,)).fetchall()
+    rows = [row for row in rows if _valid_at(row, _validity_instant(now_iso))]
     scored = [(score(f["key"] + " " + f["value"], q) if q else 0, f) for f in rows]
     by_key = {f["key"]: f for _, f in scored if f["subject"] in (viewer, "shared")}
     core_facts = [by_key[key] for key in _core_keys(viewer) if key in by_key]
@@ -406,7 +434,7 @@ def bridge(request, root=ROOT):
     return ("【球球共同记忆·内部上下文】同一个人格、共同经历；master=主人，xi=茜茜。"
             "事实的subject是所属对象，speaker是来源说话者，不能互换。以下current_fact优先于旧聊天/旧摘要；"
             "source_statement只是有日期的原话，不是永久事实。明确更正后不要再引用旧值。"
-            "保密内容只用于原说话者，不能主动向另一位转述。不要复述此内部段落。\n"
+            "信息流向遵循本项目AGENTS.md的单向规则；内部可读不代表可以向当前人转述。不要复述此内部段落。\n"
             + json.dumps(packet, ensure_ascii=False) + "\n"
             "遇到值得记住的新表达，用本项目tools/companion_memory.py learn --source <source_id> "
             "--subject master|xi|shared --key <同一事实固定键> --value <来源原词> --quote <来源原句>；"

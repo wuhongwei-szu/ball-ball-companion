@@ -22,6 +22,10 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+from send_xi import (
+    ILinkError as VoiceError, _NoRedirect, _api_error, _cdn_request, _close_failed_response,
+    _read_api_response, _send_response, _success_message,
+)
 
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -32,15 +36,8 @@ if hasattr(sys.stdout, "reconfigure"):
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
 
 
-class VoiceError(Exception):
-    def __init__(self, stage, message):
-        super().__init__(message)
-        self.stage = stage
-        self.message = message
-
-
 def _opener():
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
 
 def _headers(token):
@@ -75,31 +72,42 @@ def _peer_context(token, session, context_path):
 
 
 def _post_json(url, body, token, stage):
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers=_headers(token),
-    )
+    status = None
     try:
+        request = urllib.request.Request(
+            url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            method="POST", headers=_headers(token),
+        )
         with _opener().open(request, timeout=30) as response:
-            return response.status, response.headers, response.read()
+            status, headers = response.status, response.headers
+            raw = _read_api_response(response)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:300]
-        raise VoiceError(stage, f"HTTP {exc.code}: {detail}")
+        status = exc.code
+        try:
+            raw = _read_api_response(exc)
+        except Exception as read_error:
+            raise _api_error(stage, status, reason=type(read_error).__name__) from None
+        finally:
+            _close_failed_response(exc)
+        raise _api_error(stage, status, raw) from None
     except Exception as exc:
-        raise VoiceError(stage, f"{type(exc).__name__}: {str(exc)[:200]}")
+        raise _api_error(stage, status, reason=type(exc).__name__) from None
+    if status != 200:
+        raise _api_error(stage, status, raw)
+    return status, headers, raw
 
 
 def _parse(raw):
     if not raw:
         return {}
     try:
-        return json.loads(raw.decode("utf-8", "replace"))
+        value = json.loads(raw.decode("utf-8", "replace"))
+        return value if isinstance(value, dict) else {}
     except Exception:
         return {}
 
 
+@c.outbound_serialized
 def send_voice(target, audio_path):
     c.assert_target(target)
     token, session, context_path = _target(target)
@@ -145,12 +153,7 @@ def send_voice(target, audio_path):
 
     download_param = ""
     for attempt in range(3):
-        request = urllib.request.Request(
-            upload_url,
-            data=ciphertext,
-            method="POST",
-            headers={"Content-Type": "application/octet-stream", "User-Agent": "cc-connect-weixin/1.0"},
-        )
+        request = _cdn_request(upload_url, ciphertext)
         try:
             with _opener().open(request, timeout=60) as response:
                 headers = {k.lower(): v for k, v in response.headers.items()}
@@ -160,18 +163,18 @@ def send_voice(target, audio_path):
                 raise VoiceError("cdn", "CDN 上传成功但缺少 x-encrypted-param")
             break
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", "replace")[:200]
+            _close_failed_response(exc)
             if 500 <= exc.code < 600 and attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise VoiceError("cdn", f"CDN 上传失败：HTTP {exc.code}: {body}")
+            raise VoiceError("cdn", f"CDN 上传失败：HTTP {exc.code}") from None
         except VoiceError:
             raise
         except Exception as exc:
             if attempt < 2:
                 time.sleep(0.6 * (attempt + 1))
                 continue
-            raise VoiceError("cdn", f"CDN 上传失败：{type(exc).__name__}: {str(exc)[:200]}")
+            raise VoiceError("cdn", f"CDN 上传失败：{type(exc).__name__}") from None
 
     voice_item = {
         "media": {
@@ -196,17 +199,10 @@ def send_voice(target, audio_path):
         },
         "base_info": {"channel_version": "cc-connect-weixin/1.0"},
     }
-    _, _, raw_resp = _post_json(c.WEIXIN_API_URL, body, token, "sendmessage")
-    result = _parse(raw_resp)
-    if not result:
-        return {"ok": True}
-    ret = result.get("ret", -1)
-    if ret == 0:
-        return {"ok": True}
-    errmsg = result.get("errmsg", "")
-    if ret == -2:
-        raise VoiceError("sendmessage", "上游 ret=-2（节流/会话异常），不要重试")
-    raise VoiceError("sendmessage", f"ret={ret} errmsg={errmsg}")
+    status, _, raw_resp = _post_json(c.WEIXIN_API_URL, body, token, "sendmessage")
+    result = _send_response(status, raw_resp)
+    c.record_outbound(target)
+    return result
 
 
 def main():
@@ -214,11 +210,13 @@ def main():
         print("用法: python -X utf8 send_voice.py master|xi <path.amr>")
         return 1
     try:
-        send_voice(sys.argv[1], sys.argv[2])
+        result = send_voice(sys.argv[1], sys.argv[2])
     except VoiceError as exc:
         print(f"语音发送失败[{exc.stage}]：{exc.message}")
         return 1
-    print("语音已发送（原生语音条是否显示取决于微信 iLink）")
+    if isinstance(result, int):
+        return result
+    print(_success_message(result))
     return 0
 
 

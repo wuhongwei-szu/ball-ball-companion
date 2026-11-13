@@ -1,3 +1,28 @@
+## v0.3.0 — 2026-11-13
+
+- Preserve complete WeChat voice attachments alongside existing transcription;
+  add full-recording listening through the official OpenAI SDK and an audio
+  model while retaining the existing main chat model and agent backend.
+- Decode Tencent SILK with silk-python without trimming silence or pauses;
+  reject incomplete recordings and truncated/refused analysis, disable SDK
+  request-body logs and automatic retries.
+- Share local-state locking across delivery, capture and timer tools; preserve
+  damaged budget evidence, scope TOML accounts to the selected project, and
+  avoid duplicate sends after uncertain results.
+- Journal timer creation and recover partial multi-recipient requests without
+  recreating uncertain timers. Keep scheduled timers in backups and original
+  attachments in full backups; propagate copy failures before retention cleanup.
+- Archive generated replies with ownership, continuity and timestamp checks;
+  preserve unresolved ranges and real repeated messages. Compare fact validity
+  across time zones and retain concurrently extended facts.
+- Improve contextual care, correction handling and configurable prompt guidance;
+  preserve sticker behavior and separate sharing permission from storage.
+- Harden staged secret scans and sync scope; default sync to preparation only.
+  Add dependency installation to CI and document maintained-engine requirements.
+- Validate with 79 offline Python checks, focused maintained-engine regressions,
+  and the original-audio integration path. Keep private data and deployment
+  artifacts outside the public repository.
+
 ## 2026-11-12 - Memory evolution, comfort stickers and channel identity
 
 - Add viewer-first, relevance-filtered memory retrieval; the current person's

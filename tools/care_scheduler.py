@@ -60,8 +60,9 @@ def pick_times(n, now):
 
 
 CARE_PROMPT = """【上下文关怀】现在是 {when_text}。本次只评估 {target_label}（{target}），不要给另一位发消息。今天每人各有一次评估机会，不保证一定发送。
-请阅读 {work_dir}/PERSONA.md，以及共享记忆中与本次对象相关的内容、memory/raw/{sid}/ 今天和昨天的原文、memory/notes/{sid}/、memory/THREADS.md 和 memory/WEEKLY.md（如果存在）。只使用本对象可知的信息，不透露另一位私下说的话。
+请阅读 {work_dir}/PERSONA.md 和 AGENTS.md，以及共享记忆中与本次对象相关的内容、memory/raw/{sid}/ 今天和昨天的原文、memory/notes/{sid}/、memory/THREADS.md 和 memory/WEEKLY.md（如果存在）。信息流向遵循当前 AGENTS.md：主人所说不能透露给小主人；小主人内容可按主人要求复述给主人，不借关怀自动传话。
 优先接续对方最近提过的生活小事、兴趣、好消息或想跟进的话题，不必等到困难或紧急情况才联系；不要编造近况，也不要固定模板问候。先看 THREADS.md 里有没有具体约定/未完话题，有就优先接续；没有真实话题就不要硬找。
+一次只接一个具体话题；已有本人回应的事及时闭环，已解决文件不再催，已有提醒不重复建。保持当前积极发表情的程度，按情绪换图，不用降频代替语义选择。
 如果最近两次主动消息对方都没回、对方已要求别打扰、过去 30 分钟正在聊天、没有合适话题、上下文过期、账号无法确认或发送状态不明，就只回复 NO_REPLY。不要补发和重试。
 如有合适内容，用 python -X utf8 {work_dir}/tools/chat_burst.py {target} --proactive [--sticker <分类>] "一句自然的话" 发送。最多 2 条气泡，图片也算一条；带表情时只发 1 条文字加 1 张合适的表情，不带表情最多 2 条文字。每位接收者仍受已有每日主动额度和间隔限制。
 选择表情前读取 assets/stickers/CATEGORIES.md，只用本机已有分类，不编造分类。安慰优先 `--sticker comfort --sticker-prefer "抱,抱抱,贴贴,摸头,摸摸,合十,击掌,亲亲,安慰"`；开心用 happy/meow；严肃或刚收到坏消息先用文字。脚本提示额度/冷却/发送失败就停止，不换工具重试。

@@ -49,8 +49,10 @@ def load_manifest():
 
 
 def load_usage():
-    data = c.load_json(c.STICKER_USAGE_FILE, {})
-    return data if isinstance(data, dict) else {}
+    data = c.local_state.read_json(c.STICKER_USAGE_FILE, {})
+    if not isinstance(data, dict):
+        raise c.local_state.StateError('invalid sticker usage')
+    return data
 
 
 def load_extra_tags():
@@ -64,12 +66,16 @@ def load_extra_tags():
 
 def target_state(usage, target):
     state = usage.get(target)
-    if not isinstance(state, dict):
+    if target not in usage:
         state = {}
         usage[target] = state
+    elif not isinstance(state, dict):
+        raise c.local_state.StateError('invalid sticker recipient state')
     sent = state.get("sent")
-    if not isinstance(sent, list):
+    if 'sent' not in state:
         state["sent"] = []
+    elif not isinstance(sent, list) or any(not isinstance(item, dict) for item in sent):
+        raise c.local_state.StateError('invalid sticker history')
     return state
 
 
@@ -266,6 +272,7 @@ def _record(target, manifest, entry, proactive):
     c.append_recent(f"[表情包:{entry.get('id','')}]")
 
 
+@c.outbound_serialized
 def send_one(target, category=None, style=None, sticker_id=None,
              proactive=False, force=False, dry_run=False, skip_budget=False, prefer=None):
     """Select, send and record one sticker. Returns 0/-1/3; never raises on send."""

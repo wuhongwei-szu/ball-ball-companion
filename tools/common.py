@@ -6,12 +6,16 @@ openids are never stored there: they are read at runtime from the existing
 cc-connect config and session files.
 """
 import datetime
+import functools
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import tomllib
+
+import local_state
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -68,9 +72,10 @@ def load_config():
             user_cfg = json.load(f)
     except FileNotFoundError:
         user_cfg = {}
-    except Exception as exc:
-        print(f"config error: {exc}")
-        user_cfg = {}
+    except (OSError, ValueError) as exc:
+        raise ValueError('cannot read bot configuration; refusing default routing') from exc
+    if not isinstance(user_cfg, dict):
+        raise ValueError('bot configuration must be an object')
     cfg.update(user_cfg)
     for key in PATH_KEYS:
         cfg[key] = _expand(cfg.get(key, ""))
@@ -120,23 +125,24 @@ def _derive_session_key(session_file, session_id):
 
 
 def _parse_weixin_platforms(cc_config_file):
-    """Return [(account_id, token), ...] for weixin platform blocks."""
-    try:
-        with open(cc_config_file, encoding="utf-8") as f:
-            text = f.read()
-    except Exception:
+    """Read only the selected project's accounts using the TOML parser."""
+    if not cc_config_file:
         return []
-    blocks = text.split("[[projects.platforms]]")[1:]
+    try:
+        with open(cc_config_file, 'rb') as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise ValueError('cannot read cc-connect configuration') from exc
+    projects = [p for p in data.get('projects', []) if p.get('name') == PROJECT]
+    if len(projects) != 1:
+        raise ValueError('missing or ambiguous configured project')
     out = []
-    for block in blocks:
-        if not re.search(r'^\s*type\s*=\s*"weixin"', block, re.M):
-            continue
-        token = re.search(r'^\s*token\s*=\s*"([^"]+)"', block, re.M)
-        account = re.search(r'^\s*account_id\s*=\s*"([^"]+)"', block, re.M)
-        out.append((
-            account.group(1) if account else "",
-            token.group(1) if token else "",
-        ))
+    for platform in projects[0].get('platforms', []):
+        if platform.get('type') == 'weixin':
+            options = platform.get('options', {})
+            out.append((_expand(options.get('account_id', '')), _expand(options.get('token', ''))))
     return out
 
 
@@ -256,7 +262,8 @@ def session_peer(session):
     if not session:
         return ""
     marker = "weixin:dm:"
-    return session.split(marker, 1)[1] if marker in session else session
+    peer = session.split(marker, 1)[1] if marker in session else session
+    return peer.split('#account:', 1)[0]
 
 
 def read_context_token(path, peer):
@@ -306,18 +313,42 @@ def _local_now():
     return datetime.datetime.now().astimezone()
 
 
+def outbound_serialized(func):
+    """Serialize budget check, transport and receipt across send tools."""
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        try:
+            with local_state.locked(OUTBOUND_STATE_FILE, reentrant=True):
+                return func(*args, **kwargs)
+        except local_state.StateBusy:
+            print('[state] 另一条发送正在处理中；本次未开始，请稍后核对。')
+            return 3
+        except (local_state.StateError, OSError):
+            print('[state] 本地发送记录无法读取或保存；请核实本次送达与状态文件，不要自动重发。')
+            return 1
+    return wrapped
+
+
 def _outbound_entry(target):
     """Load/create today's outbound counters for one bot."""
-    state = load_json(OUTBOUND_STATE_FILE, {})
+    state = local_state.read_json(OUTBOUND_STATE_FILE, {})
     if not isinstance(state, dict):
-        state = {}
+        raise local_state.StateError('invalid outbound state')
     today = _local_now().date().isoformat()
     target_state = state.get(target)
-    if not isinstance(target_state, dict):
+    if target not in state:
         target_state = {}
         state[target] = target_state
+    elif not isinstance(target_state, dict):
+        raise local_state.StateError('invalid recipient counters')
+    for day, previous in target_state.items():
+        if re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+            if not isinstance(previous, dict) or any(
+                    type(previous.get(key, 0)) is not int or previous.get(key, 0) < 0
+                    for key in ('proactive', 'replies')):
+                raise local_state.StateError('invalid daily counters')
     entry = target_state.get(today)
-    if not isinstance(entry, dict):
+    if today not in target_state:
         entry = {"proactive": 0, "replies": 0, "last_proactive": ""}
         target_state[today] = entry
     cutoff = (_local_now().date() - datetime.timedelta(days=7)).isoformat()
@@ -362,13 +393,14 @@ def proactive_remaining(target):
 
 def record_outbound(target, proactive=False, count=1):
     """Persist a successful outbound message count."""
-    state, entry = _outbound_entry(target)
-    if proactive:
-        entry["proactive"] = int(entry.get("proactive", 0) or 0) + count
-        entry["last_proactive"] = _local_now().isoformat(timespec="seconds")
-    else:
-        entry["replies"] = int(entry.get("replies", 0) or 0) + count
-    save_json_atomic(OUTBOUND_STATE_FILE, state)
+    with local_state.locked(OUTBOUND_STATE_FILE, reentrant=True):
+        state, entry = _outbound_entry(target)
+        if proactive:
+            entry["proactive"] = int(entry.get("proactive", 0) or 0) + count
+            entry["last_proactive"] = _local_now().isoformat(timespec="seconds")
+        else:
+            entry["replies"] = int(entry.get("replies", 0) or 0) + count
+        save_json_atomic(OUTBOUND_STATE_FILE, state)
 
 
 def sanitize_wechat(text):

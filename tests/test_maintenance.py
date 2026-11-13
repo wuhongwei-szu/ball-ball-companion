@@ -1,6 +1,7 @@
-import ast, datetime, json, tempfile, types, unittest, contextlib, io
+import ast, datetime, json, tempfile, types, unittest, contextlib, io, sys
 from pathlib import Path
 P=Path(__file__).resolve().parents[1]/'tools'
+sys.path.insert(0,str(P))
 def functions(path,names,env):
  tree=ast.parse(path.read_text(encoding='utf-8'))
  nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
@@ -18,7 +19,7 @@ class Checks(unittest.TestCase):
  def setUp(self):
   self.now=datetime.datetime.fromisoformat('2026-11-08T00:01:00+08:00')
   self.state={}
-  c.update(_local_now=lambda:self.now,load_json=lambda *a:self.state,OUTBOUND_STATE_FILE='unused',PROACTIVE_DAILY_LIMIT=4,PROACTIVE_MIN_GAP_SECONDS=300)
+  c.update(_local_now=lambda:self.now,load_json=lambda *a:self.state,local_state=types.SimpleNamespace(read_json=lambda *a:self.state),OUTBOUND_STATE_FILE='unused',PROACTIVE_DAILY_LIMIT=4,PROACTIVE_MIN_GAP_SECONDS=300)
  def entry(self,day,stamp,count=1,target='master'):
   self.state.setdefault(target,{})[day]={'last_proactive':stamp,'proactive':count}
  def test_care_templates(self):
@@ -31,7 +32,6 @@ class Checks(unittest.TestCase):
  def test_legacy(self):
   for t in ('每日要闻','静默记忆整理任务','主动关心任务','【系统通知】'):
    self.assertTrue(cap['is_synthetic_prompt'](t))
- @unittest.expectedFailure
  def test_known_legacy_false_positive(self):self.assertFalse(cap['is_synthetic_prompt']('我想聊每日要闻的标题'))
  def test_midnight_block(self):
   self.entry('2026-11-07','2026-11-07T23:59:00+08:00')
@@ -62,7 +62,7 @@ class Checks(unittest.TestCase):
   self.entry('2026-11-08','2026-11-08T00:02:00+08:00')
   self.assertEqual(c['proactive_remaining']('master')[0],0)
  def test_capture_integration(self):
-  with tempfile.TemporaryDirectory() as d:
+  with tempfile.TemporaryDirectory(dir=P.parent, prefix="synthetic-") as d:
    p=Path(d); session=p/'sessions.json'; state=p/'capture'
    data={'sessions':{'s1':{'id':'s1','history':[]},'s2':{'id':'s2','history':[]}},'user_sessions':{'a':['s1'],'b':['s2']},'active_session':{'a':'s1','b':'s2'}}
    session.write_text(json.dumps(data),encoding='utf-8'); saved=[]

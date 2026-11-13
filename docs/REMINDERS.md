@@ -21,6 +21,9 @@ or serious reminders.
 - `--owner master|xi|both`
 - Rejects times in 23:00-07:00 unless `--allow-night`
 - Deduplicates by owner/date/time/title in `memory/reminders.json`
+- Creation is journaled under the same lock used by reminder maintenance.
+  `creating` / `uncertain` means reconcile remote timers before retrying;
+  `both` retries only a recipient whose creation definitely did not start.
 - `reminder_admin.py --list` shows status; `--gc` marks past scheduled entries
   expired, and the daily `b03857e6` cron runs it automatically
 - Requires cc-connect to be running (it uses the local API socket)
@@ -29,12 +32,12 @@ or serious reminders.
 
 `care_scheduler.py` runs from the `careplan01` cron at 08:17:
 
-- Rolls 0-2 opportunities with weights 55/32/13.
-- A day with 0 opportunities sends nothing.
+- Plans one evaluation opportunity per recipient per day. An evaluation may
+  decide to send nothing. Existing same-day legacy plans are preserved.
 - Times are random between 08:30 and 21:30, at least 2 hours apart.
 - No proactive care at 23:00-07:00.
-- Proactive messages share a local safety budget: 4 messages/24h and a
-  5-minute gap, below the observed iLink 4-6/24h server limit. Each care
+- Each recipient's proactive tools share a local calendar-day budget of
+  4 messages and a 5-minute gap. These are local settings, not official limits. Each care
   opportunity sends at most 2 bubbles.
 - Each opportunity is only a chance: the agent decides from `STATE.md`,
   `MEMORY.md`, `EVENTS.md`, `THREADS.md`, and recent raw context whether there
@@ -49,10 +52,9 @@ dsh-proactive / whalecare (daily limit and quiet hours), and cc-connect timers.
 
 Edit the constants in `care_scheduler.py`:
 
-- `WEIGHTS` — how often 0/1/2 opportunities occur
 - `WINDOW_START_MIN` / `WINDOW_END_MIN` — safe active window
 - `MIN_GAP_MIN` — spacing between opportunities
-- `MAX_TIMERS` — daily cap
+- `TARGETS` — the recipients evaluated once each
 
 ## Troubleshooting
 

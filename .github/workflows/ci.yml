@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    tags-ignore: ["**"]
   pull_request:
 
 jobs:
@@ -14,7 +15,9 @@ jobs:
           python-version: "3.11"
       - name: Compile Python
         run: python -m compileall tools scripts
-      - name: Synthetic memory regression
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Offline regressions
         run: python -m unittest discover -s tests -v
       - name: Secret scan
         run: python scripts/secret_scan.py

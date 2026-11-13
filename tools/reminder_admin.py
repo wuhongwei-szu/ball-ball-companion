@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
+import care_timer_state as state
 
 STATUSES = {"scheduled", "sent", "expired", "cancelled"}
 
@@ -27,7 +28,9 @@ def load():
     try:
         with open(c.REMINDERS_INDEX, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+            raise state.StateError('invalid reminder index; preserve it for inspection')
+        return data
     except FileNotFoundError:
         return []
 
@@ -55,6 +58,15 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    try:
+        with state.locked(c.REMINDERS_INDEX):
+            return maintain(args, parser)
+    except (state.StateError, OSError, ValueError):
+        print('提醒状态无法读取或正在修改；本次未变更，请稍后核对。', file=sys.stderr)
+        return 1
+
+
+def maintain(args, parser):
     items = load()
     if args.list:
         for item in items:

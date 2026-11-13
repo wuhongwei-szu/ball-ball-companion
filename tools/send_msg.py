@@ -16,18 +16,23 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as c
 
 
+@c.outbound_serialized
 def send_master(text):
     c.require(c.MASTER_SESSION, "master_session（从 session 文件推导）")
     text = c.sanitize_wechat(text)
-    result = c.run_cc([
-        "send", "-p", c.PROJECT, "--session", c.MASTER_SESSION, "-m", text,
-    ])
+    try:
+        result = c.run_cc([
+            "send", "-p", c.PROJECT, "--session", c.MASTER_SESSION, "-m", text,
+        ])
+    except (subprocess.TimeoutExpired, OSError):
+        print('文字发送结果未确认；请先核实送达，不要自动重发。')
+        return 1
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         if "send budget exhausted" in detail.lower() or "budget" in detail.lower():
-            print("微信主动发送额度暂时用完，球球先不发了；等额度恢复或重新登录后再试。")
+            print("cc-connect 本地发送保护已触发；先等待并核对状态，不要重新登录或连续重试。")
             return 2
-        print(f"发送失败：{detail[:200]}")
+        print(f"文字发送结果未确认（cc-connect 状态 {result.returncode}）；请先核实送达，不要自动重发。")
         return 1
     c.append_raw("s1", text)
     c.append_recent(text)
@@ -35,6 +40,7 @@ def send_master(text):
     return 0
 
 
+@c.outbound_serialized
 def send_xi(text, relay=False):
     c.require(c.XI_SESSION, "xi_session（从 session 文件推导）")
     text = c.sanitize_wechat(text)

@@ -30,7 +30,7 @@ Register-ScheduledTask `
 # Daily backup at 04:17 (after the 03:17 memory consolidation).
 $backupAction = New-ScheduledTaskAction `
     -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
-    -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + (Join-Path $BotRoot "tools\backup.ps1") + '"')
+    -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + (Join-Path $BotRoot "tools\backup.ps1") + '" -BotRoot "' + $BotRoot + '" -CcDataDir "' + $CcDataDir + '"')
 $backupTrigger = New-ScheduledTaskTrigger -Daily -At 04:17
 Register-ScheduledTask `
     -TaskName "cc-connect-backup" `

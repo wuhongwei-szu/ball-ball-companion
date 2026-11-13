@@ -13,6 +13,10 @@ endorsed by OpenAI, Tencent/WeChat, or the upstream projects below.
 - **WeChat ilink bot platform** — the messaging gateway. Use it in accordance
   with the platform's terms.
 
+- **OpenAI Python SDK** — official audio API client: <https://github.com/openai/openai-python>.
+- **silk-python** — Tencent SILK decoding: <https://github.com/synodriver/pysilk>.
+  Installed packages retain their upstream notices; no decoder source or model weights are copied here.
+
 ## Design inspiration
 
 The following projects informed the behavior and architecture. No source code

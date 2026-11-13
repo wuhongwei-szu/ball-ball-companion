@@ -14,6 +14,8 @@ import secrets
 import sys
 import tempfile
 
+import local_state
+
 
 ABSENT = object()
 
@@ -155,35 +157,12 @@ def validate_state(state):
 
 @contextlib.contextmanager
 def locked(path):
-    """Protect v2 capture writers only; never unlink the lock inode."""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path + ".lock", "a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0, os.SEEK_END)
-            if not handle.tell():
-                handle.write(b"\0")
-                handle.flush()
-            handle.seek(0)
-            try:
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError:
-                fail("capture_busy")
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                fail("capture_busy")
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+    """Use the same local-state lock as timer and outbound writers."""
+    try:
+        with local_state.locked(path):
+            yield
+    except local_state.StateBusy:
+        fail("capture_busy")
 
 
 def save_state(path, state):
@@ -246,9 +225,13 @@ def review_count_active(state):
 
 
 def is_synthetic_prompt(text):
-    """Retain legacy filtering and recognize the generated care/reminder templates."""
-    if any(marker in text for marker in (
-            "每日要闻", "静默记忆整理任务", "主动关心任务", "【系统通知】")):
+    """Recognize task headers, never discard ordinary mentions of their names."""
+    stripped = text.lstrip()
+    if stripped.startswith(('【共同记忆版本规则（优先）】\n', '【每周记忆反思（静默）】')):
+        return True
+    markers = ("每日要闻", "静默记忆整理任务", "主动关心任务", "【系统通知】")
+    if any(stripped == marker or stripped.startswith(tuple(
+            marker + sep for sep in ('\n', ':', '：'))) for marker in markers):
         return True
     return (text.startswith(("【上下文关怀】现在是 ", "【定时提醒】现在是 "))
             and "/tools/chat_burst.py " in text

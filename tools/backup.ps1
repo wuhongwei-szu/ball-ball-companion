@@ -10,6 +10,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$BotRoot = [IO.Path]::GetFullPath($BotRoot)
+$CcDataDir = [IO.Path]::GetFullPath($CcDataDir)
 
 if (-not $DestinationRoot) {
     if (Test-Path "G:\") {
@@ -18,12 +20,31 @@ if (-not $DestinationRoot) {
         $DestinationRoot = Join-Path $BotRoot "backups"
     }
 }
+$DestinationRoot = [IO.Path]::GetFullPath($DestinationRoot)
+# A destination inside a recursively copied directory would copy its own stage.
+$recursiveSources = @("memory", "tools", "config", "assets", "maintenance") |
+    ForEach-Object { Join-Path $BotRoot $_ }
+$recursiveSources += @((Join-Path $CcDataDir "crons"), (Join-Path $CcDataDir "sessions"),
+                       (Join-Path $CcDataDir "timers"), (Join-Path $BotRoot ".cc-connect\attachments"))
+foreach ($source in $recursiveSources) {
+    $sourcePath = [IO.Path]::GetFullPath($source).TrimEnd('\', '/')
+    if ($DestinationRoot.Equals($sourcePath, [StringComparison]::OrdinalIgnoreCase) -or
+        $DestinationRoot.StartsWith($sourcePath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Backup destination must be outside copied source directories."
+    }
+}
+# Missing core sources must never produce a plausible but empty recovery point.
+foreach ($sourcePath in @((Join-Path $BotRoot "memory"), (Join-Path $BotRoot "tools"),
+                         (Join-Path $BotRoot "config"), (Join-Path $CcDataDir "config.toml"),
+                         (Join-Path $CcDataDir "crons"), (Join-Path $CcDataDir "sessions"))) {
+    if (-not (Test-Path -LiteralPath $sourcePath)) { throw "Required backup source missing: $sourcePath" }
+}
 New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
 
 $isFull = $Full.IsPresent -or ((Get-Date).DayOfWeek -eq "Sunday")
 $mode = if ($isFull) { "full" } else { "daily" }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$stage = Join-Path $DestinationRoot ("stage-" + $stamp)
+$stage = Join-Path $DestinationRoot ("stage-" + $stamp + "-" + [Guid]::NewGuid().ToString("N"))
 $botDir = Join-Path $stage "bot"
 $ccDir = Join-Path $stage "cc-connect"
 $codexDir = Join-Path $stage "codex"
@@ -31,11 +52,7 @@ New-Item -ItemType Directory -Force -Path $botDir, $ccDir, $codexDir | Out-Null
 
 function Copy-Safe([string]$src, [string]$dst) {
     if (Test-Path -LiteralPath $src) {
-        try {
-            Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force -ErrorAction Stop
-        } catch {
-            Write-Warning ("copy failed: " + $src + " -> " + $_.Exception.Message)
-        }
+        Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force -ErrorAction Stop
     }
 }
 
@@ -51,7 +68,13 @@ Copy-Safe (Join-Path $BotRoot "config") $botDir
 Copy-Safe (Join-Path $BotRoot "bin\codex.exe") $binDir
 
 if ($isFull) {
-    # Weekly full: include the sticker images, cc-connect binaries and release notes.
+    # Weekly full: also retain received original audio without growing daily ZIPs.
+    $attachments = Join-Path $BotRoot ".cc-connect\attachments"
+    if (Test-Path -LiteralPath $attachments) {
+        $localCcDir = Join-Path $botDir ".cc-connect"
+        New-Item -ItemType Directory -Force -Path $localCcDir | Out-Null
+        Copy-Safe $attachments $localCcDir
+    }
     Copy-Safe (Join-Path $BotRoot "assets") $botDir
     Copy-Safe (Join-Path $BotRoot "maintenance") $botDir
     Copy-Safe (Join-Path $BotRoot "bin\cc-connect.exe") $binDir
@@ -77,6 +100,7 @@ Copy-Safe (Join-Path $BotRoot ".codex\config.toml") $codexDir
 Copy-Safe (Join-Path $CcDataDir "config.toml") $ccDir
 Copy-Safe (Join-Path $CcDataDir "crons") $ccDir
 Copy-Safe (Join-Path $CcDataDir "sessions") $ccDir
+Copy-Safe (Join-Path $CcDataDir "timers") $ccDir
 Copy-Safe (Join-Path $CcDataDir "start_cc.bat") $ccDir
 Copy-Safe (Join-Path $CcDataDir "start_cc_hidden.vbs") $ccDir
 
@@ -103,7 +127,15 @@ if (Test-Path -LiteralPath $lnk) {
 }
 
 $zip = Join-Path $DestinationRoot ("cc-weixin-" + $mode + "-" + $stamp + ".zip")
-Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -Force
+$pendingZip = Join-Path $DestinationRoot ("pending-" + [Guid]::NewGuid().ToString("N") + ".zip")
+Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $pendingZip -ErrorAction Stop
+Move-Item -LiteralPath $pendingZip -Destination $zip -ErrorAction Stop
+# Resolve and verify the generated stage before recursive cleanup.
+$resolvedStage = [IO.Path]::GetFullPath($stage)
+if (-not $resolvedStage.StartsWith($DestinationRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar,
+                                  [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing cleanup outside backup destination."
+}
 Remove-Item -LiteralPath $stage -Recurse -Force
 
 function Prune-Pattern([string]$pattern, [int]$days, [switch]$KeepNewest) {

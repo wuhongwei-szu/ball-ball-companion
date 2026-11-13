@@ -88,6 +88,51 @@ class SharedMemoryTests(unittest.TestCase):
             self.assertGreaterEqual(row["access_count"], 1)
             self.assertTrue(row["last_accessed"])
 
+    def test_validity_compares_instants_across_timezone_offsets(self):
+        self.add('master', '我喜欢红茶', '饮料', '红茶',
+                 valid_from='2026-11-13T01:00:00+00:00',
+                 valid_until='2026-11-13T02:00:00+00:00')
+        with m.database(self.root) as db, patch.object(m, 'now', return_value='2026-11-13T08:30:00+08:00'):
+            self.assertFalse(any(f['kind'] == 'current_fact' for f in m.recall(db, 'master', '饮料')))
+            self.assertEqual(m.expire_facts(db), 0)
+        with m.database(self.root) as db, patch.object(m, 'now', return_value='2026-11-13T09:30:00+08:00'):
+            self.assertTrue(any(f['kind'] == 'current_fact' for f in m.recall(db, 'master', '饮料')))
+            self.assertEqual(m.expire_facts(db), 0)
+        with m.database(self.root) as db:
+            self.assertEqual(m.expire_facts(db, '2026-11-13T10:00:00+08:00'), 1)
+
+    def test_invalid_validity_does_not_replace_current_preference(self):
+        self.add('master', '我喜欢红茶', '饮料', '红茶')
+        with self.assertRaises(m.MemoryError):
+            self.add('master', '我喜欢绿茶', '饮料', '绿茶', msg='2', valid_until='not-a-date')
+        self.assertEqual(m.search('饮料', self.root, 'master')[0]['value'], '红茶')
+
+    def test_expiration_does_not_remove_concurrently_extended_fact(self):
+        self.add('master', '我喜欢红茶', '饮料', '红茶', valid_until='2026-11-13T01:00:00+00:00')
+        with m.database(self.root) as db, m.database(self.root) as other:
+            class ConcurrentExtension:
+                def __enter__(self):
+                    db.__enter__()
+                    return self
+
+                def __exit__(self, *args):
+                    return db.__exit__(*args)
+
+                def execute(self, sql, params=()):
+                    if sql.startswith('UPDATE facts SET active=0'):
+                        with other:
+                            other.execute("UPDATE facts SET valid_until='2026-11-14T01:00:00+00:00'")
+                    return db.execute(sql, params)
+
+            self.assertEqual(m.expire_facts(ConcurrentExtension(), '2026-11-13T02:00:00+00:00'), 0)
+            self.assertEqual(db.execute('SELECT active FROM facts').fetchone()[0], 1)
+
+    def test_caller_account_fallback_does_not_accept_wrong_project(self):
+        with patch.dict(os.environ, {'CC_PROJECT': 'other', 'CC_PLATFORM_ACCOUNT': 'master-bot',
+                                     'CC_SESSION_KEY': 'fixture:s9'}, clear=True):
+            with self.assertRaises(m.MemoryError):
+                m.env_caller(self.cfg)
+
     def test_one_explicit_correction_immediately_replaces_old_value(self):
         m.bridge(self.req(text="记住我的饮料偏好是红茶"),self.root)
         packet=m.bridge(self.req(text="更正，我的饮料偏好是乌龙茶",msg="2"),self.root)

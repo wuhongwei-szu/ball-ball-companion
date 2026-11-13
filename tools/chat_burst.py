@@ -54,6 +54,7 @@ def _send_text(target, text):
     return send_msg.send_xi(text)
 
 
+@c.outbound_serialized
 def main():
     parser = argparse.ArgumentParser(description="发短消息 + 可选 1 张表情")
     parser.add_argument("target", choices=["master", "xi"])
@@ -153,9 +154,7 @@ def main():
             return code
         c.record_outbound(args.target, proactive=args.proactive)
 
-    if args.proactive and messages:
-        c.append_care_log(args.target, messages[0], args.sticker if send_sticker_flag else "")
-
+    sent_sticker = ""
     if send_sticker_flag:
         code = send_sticker.send_one(
             args.target,
@@ -167,10 +166,16 @@ def main():
             prefer=args.sticker_prefer,
         )
         if code not in (0, 3):
+            if args.proactive and messages:
+                c.append_care_log(args.target, messages[0])
             print("[chat] 文字已送达，表情发送失败；不要重发文字")
             return code
+        if code == 0:
+            sent_sticker = args.sticker
         if code == 3:
             print("[chat] 文字已送达，表情按限额/冷却跳过")
+    if args.proactive and messages:
+        c.append_care_log(args.target, messages[0], sent_sticker)
     return 0
 
 

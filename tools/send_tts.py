@@ -105,14 +105,8 @@ def _send_master(path):
 def _send_xi(path):
     if send_xi is None:
         raise RuntimeError("缺少 send_xi 模块")
-    # Prefer the active cc-connect session, then direct as a last resort.
-    if c.current_target() == "xi" and c.XI_SESSION:
-        first = c.run_cc([
-            "send", "-p", c.PROJECT, "--session", c.XI_SESSION,
-            "--file", path,
-        ], timeout=120)
-        if first.returncode == 0:
-            return True
+    # The shared helper selects exactly one route. A failed process may have
+    # delivered the file, so this caller must never issue a second send.
     try:
         send_xi.send_file(path)
     except Exception as exc:
@@ -120,6 +114,7 @@ def _send_xi(path):
     return True
 
 
+@c.outbound_serialized
 def send_voice(target, text, voice, proactive=False, dry_run=False, rate=None, pitch=None, volume=None):
     c.assert_target(target)
     text = " ".join(text.split()).strip()

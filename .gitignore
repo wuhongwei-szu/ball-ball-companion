@@ -23,6 +23,7 @@ backups/
 
 # Codex / agent state
 .codex/
+.cc-connect/
 auth.json
 *_auth.json
 
